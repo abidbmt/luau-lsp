@@ -662,6 +662,99 @@
           ],
           "scope": "resource"
         },
+        "luau-lsp.completion.imports.boundaries.rules": {
+          "markdownDescription": "Execution boundary rules for auto-imports. Each rule assigns a boundary (`client` / `server` / `shared` / `none`) to modules matching a glob. Globs are matched against workspace-relative file paths and, on the Roblox platform, DataModel paths (with or without the `game/` prefix). Later rules override earlier ones. When any rule is configured, a strict import matrix applies by default: client may import client+shared, server may import server+shared, shared may import only shared",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "glob": {
+                "type": "string",
+                "description": "Glob pattern matched against workspace-relative file paths and DataModel paths"
+              },
+              "context": {
+                "type": "string",
+                "enum": [
+                  "client",
+                  "server",
+                  "shared",
+                  "none"
+                ],
+                "description": "The execution boundary assigned to matching modules"
+              }
+            }
+          },
+          "default": [],
+          "scope": "resource"
+        },
+        "luau-lsp.completion.imports.boundaries.allowedImports": {
+          "markdownDescription": "Overrides which boundaries each boundary may import from during auto-import, e.g. `{ \"shared\": [\"shared\"] }`. Applies to rule-classified boundaries and, when set without rules, to the platform's heuristic classification (Roblox service locations)",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "client",
+                "server",
+                "shared"
+              ]
+            }
+          },
+          "default": {},
+          "scope": "resource"
+        },
+        "luau-lsp.completion.imports.visibilityRules": {
+          "markdownDescription": "Contextual visibility rules restricting where certain modules may be auto-imported from. Rules are restrictions: a module matching several rules must satisfy all of them. With `scope` set, `modules` and `visibleFrom` are matched relative to the concrete directory matching the scope glob (e.g. scope `src/Features/*` with modules `**/Internal/**` makes feature internals visible only within their own feature)",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "description": "Optional glob matched against ancestor directories of a candidate module"
+              },
+              "modules": {
+                "type": "string",
+                "description": "Glob selecting the modules restricted by this rule"
+              },
+              "visibleFrom": {
+                "type": "string",
+                "description": "Glob selecting the files that may see the restricted modules (for scoped rules, defaults to anywhere inside the scope directory)"
+              }
+            }
+          },
+          "default": [],
+          "scope": "resource"
+        },
+        "luau-lsp.completion.imports.sections.services": {
+          "markdownDescription": "Regex matched against each line to locate the comment heading under which generated `game:GetService(...)` declarations are inserted (e.g. `^--\\s*Services`). When unset or not found, the default insertion position is used",
+          "type": "string",
+          "default": "",
+          "scope": "resource"
+        },
+        "luau-lsp.completion.imports.sections.modules": {
+          "markdownDescription": "Regex matched against each line to locate the comment heading under which generated `require(...)` declarations are inserted (e.g. `^--\\s*Modules`). When unset or not found, the default insertion position is used",
+          "type": "string",
+          "default": "",
+          "scope": "resource"
+        },
+        "luau-lsp.fileOperations.updateRequiresOnMove": {
+          "markdownDescription": "How require statements referencing a moved or renamed file should be updated",
+          "type": "string",
+          "enum": [
+            "prompt",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask before updating requires",
+            "Update requires automatically without asking",
+            "Never update requires"
+          ],
+          "default": "prompt",
+          "scope": "resource"
+        },
         "luau-lsp.completion.enableFragmentAutocomplete": {
           "markdownDescription": "Enables the fragment autocomplete system for performance improvements",
           "type": "boolean",

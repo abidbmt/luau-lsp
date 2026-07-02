@@ -559,6 +559,23 @@ const startLanguageServer = async (context: vscode.ExtensionContext) => {
     ),
   );
 
+  // Invoked by the server (via $/command) when the user picks "Always update" / "Never update"
+  // in the require-update prompt, so the choice persists beyond the current session
+  clientDisposables.push(
+    vscode.commands.registerCommand(
+      "luau-lsp.setUpdateRequiresOnMove",
+      async (mode: string) => {
+        await vscode.workspace
+          .getConfiguration("luau-lsp")
+          .update(
+            "fileOperations.updateRequiresOnMove",
+            mode,
+            vscode.ConfigurationTarget.Global,
+          );
+      },
+    ),
+  );
+
   clientDisposables.push(...registerComputeBytecode(context, client));
   clientDisposables.push(...registerComputeCompilerRemarks(context, client));
   clientDisposables.push(...registerComputeCodeGen(context, client));
