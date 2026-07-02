@@ -60,6 +60,7 @@ target_sources(Luau.LanguageServer PRIVATE
         src/Thread.cpp
         src/JsonTomlSyntaxParser.cpp
         src/CliConfigurationParser.cpp
+        src/AutoImportRules.cpp
         src/platform/AutoImports.cpp
         src/platform/LSPPlatform.cpp
         src/platform/StringRequireAutoImporter.cpp
@@ -118,6 +119,7 @@ target_sources(Luau.LanguageServer.Test PRIVATE
         tests/TestClient.cpp
         tests/Autocomplete.test.cpp
         tests/AutoImports.test.cpp
+        tests/AutoImportRules.test.cpp
         tests/Bytecode.test.cpp
         tests/MagicFunctions.test.cpp
         tests/Documentation.test.cpp

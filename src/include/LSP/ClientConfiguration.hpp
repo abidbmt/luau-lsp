@@ -138,6 +138,39 @@ struct ClientCompletionImportsStringRequiresConfiguration
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsStringRequiresConfiguration, enabled);
 
+struct ClientCompletionImportsBoundaryRule
+{
+    /// Glob pattern matched against workspace-relative filesystem paths and, on the Roblox platform, DataModel paths
+    std::string glob = "";
+    /// The execution boundary assigned to matching modules: "client" | "server" | "shared" | "none"
+    std::string context = "none";
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsBoundaryRule, glob, context);
+
+struct ClientCompletionImportsBoundariesConfiguration
+{
+    /// Boundary classification rules applied to auto-import candidates. Later rules override earlier ones.
+    /// When empty, boundary filtering is disabled and the default platform behaviour is preserved
+    std::vector<ClientCompletionImportsBoundaryRule> rules{};
+    /// For each boundary ("client" | "server" | "shared"), the boundaries it may import from.
+    /// When rules are configured this defaults to { client: [client, shared], server: [server, shared], shared: [shared] }
+    std::unordered_map<std::string, std::vector<std::string>> allowedImports{};
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsBoundariesConfiguration, rules, allowedImports);
+
+struct ClientCompletionImportsVisibilityRule
+{
+    /// Optional scope glob matched against ancestor directories of a candidate module. When set, `modules` and
+    /// `visibleFrom` are matched relative to the concrete directory that matched the scope
+    std::string scope = "";
+    /// Glob selecting the modules restricted by this rule
+    std::string modules = "";
+    /// Glob selecting the files that may see the restricted modules.
+    /// For scoped rules this defaults to "**" (anywhere inside the scope directory)
+    std::string visibleFrom = "";
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsVisibilityRule, scope, modules, visibleFrom);
+
 struct ClientCompletionImportsConfiguration
 {
     /// Whether we should suggest automatic imports in completions
@@ -159,9 +192,13 @@ struct ClientCompletionImportsConfiguration
     std::vector<std::string> ignoreGlobs{"**/_Index/**"};
     /// Whether to use `const` instead of `local` for auto-imported declarations
     bool useConst = false;
+    /// Execution boundary rules restricting which modules may be auto-imported from where
+    ClientCompletionImportsBoundariesConfiguration boundaries{};
+    /// Contextual visibility rules restricting where certain modules may be auto-imported from
+    std::vector<ClientCompletionImportsVisibilityRule> visibilityRules{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsConfiguration, enabled, suggestServices, includedServices, excludedServices,
-    suggestRequires, requireStyle, stringRequires, separateGroupsWithLine, ignoreGlobs, useConst);
+    suggestRequires, requireStyle, stringRequires, separateGroupsWithLine, ignoreGlobs, useConst, boundaries, visibilityRules);
 
 struct ClientCompletionAnonymousAutofillConfiguration
 {

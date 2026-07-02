@@ -1,10 +1,25 @@
 #include "Platform/InstanceRequireAutoImporter.hpp"
 
+#include "LSP/AutoImportRules.hpp"
 #include "LSP/Completion.hpp"
 #include "Platform/RobloxPlatform.hpp"
 
 namespace Luau::LanguageServer::AutoImports
 {
+
+static BoundaryContext boundaryContextOf(ScriptContext context)
+{
+    switch (context)
+    {
+    case ScriptContext::Client:
+        return BoundaryContext::Client;
+    case ScriptContext::Server:
+        return BoundaryContext::Server;
+    case ScriptContext::Shared:
+        return BoundaryContext::Shared;
+    }
+    return BoundaryContext::Shared;
+}
 
 lsp::TextEdit createServiceTextEdit(const std::string& name, size_t lineNumber, bool appendNewline, bool useConst)
 {
@@ -34,10 +49,19 @@ std::vector<InstanceRequireResult> computeAllInstanceRequires(const InstanceRequ
 {
     std::vector<InstanceRequireResult> results;
     size_t minimumLineNumber = computeMinimumLineNumberForRequire(*ctx.importsVisitor, ctx.hotCommentsLineNumber);
-    
+
     ScriptContext callerContext = ScriptContext::Shared;
     if (auto it = ctx.platform->virtualPathsToSourceNodes.find(ctx.from); it != ctx.platform->virtualPathsToSourceNodes.end())
         callerContext = it->second->scriptContext;
+
+    const ImportRuleSet rules(*ctx.config);
+    ModulePathInfo fromPaths{};
+    if (rules.active())
+    {
+        fromPaths.fsPath = ctx.workspaceFolder->fileResolver.getUri(ctx.from).lexicallyRelative(ctx.workspaceFolder->rootUri);
+        if (ctx.platform->isVirtualPath(ctx.from))
+            fromPaths.dataModelPath = ctx.from;
+    }
 
     for (auto& [path, node] : ctx.platform->virtualPathsToSourceNodes)
     {
@@ -48,11 +72,17 @@ std::vector<InstanceRequireResult> computeAllInstanceRequires(const InstanceRequ
 
         if (path == ctx.from || node->className != "ModuleScript" || ctx.importsVisitor->containsRequire(name))
             continue;
-        if (auto scriptFilePath = ctx.platform->getRealPathFromSourceNode(node);
-            scriptFilePath && ctx.workspaceFolder->isIgnoredFileForAutoImports(*scriptFilePath))
+        auto scriptFilePath = ctx.platform->getRealPathFromSourceNode(node);
+        if (scriptFilePath && ctx.workspaceFolder->isIgnoredFileForAutoImports(*scriptFilePath))
             continue;
 
-        if (!isScriptContextCompatible(callerContext, node->scriptContext))
+        if (rules.active())
+        {
+            ModulePathInfo targetPaths{scriptFilePath ? scriptFilePath->lexicallyRelative(ctx.workspaceFolder->rootUri) : "", path};
+            if (!rules.isAutoImportAllowed(fromPaths, boundaryContextOf(callerContext), targetPaths, boundaryContextOf(node->scriptContext)))
+                continue;
+        }
+        else if (!isScriptContextCompatible(callerContext, node->scriptContext))
             continue;
 
         std::string requirePath;

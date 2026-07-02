@@ -1,6 +1,7 @@
 #include "Platform/RobloxPlatform.hpp"
 #include "Platform/RobloxStringRequireSuggester.hpp"
 #include "Platform/StringRequireAutoImporter.hpp"
+#include "LSP/AutoImportRules.hpp"
 #include "LSP/JsonTomlSyntaxParser.hpp"
 #include "LSP/Completion.hpp"
 #include "LSP/Utils.hpp"
@@ -209,6 +210,21 @@ static const SourceNode* getServiceNode(const SourceNode* n)
     return prev;
 }
 
+static Luau::LanguageServer::AutoImports::BoundaryContext boundaryContextOf(ScriptContext context)
+{
+    using Luau::LanguageServer::AutoImports::BoundaryContext;
+    switch (context)
+    {
+    case ScriptContext::Client:
+        return BoundaryContext::Client;
+    case ScriptContext::Server:
+        return BoundaryContext::Server;
+    case ScriptContext::Shared:
+        return BoundaryContext::Shared;
+    }
+    return BoundaryContext::Shared;
+}
+
 static std::optional<std::pair<std::string, const char*>> computeSourcemapRequirePath(
     const RobloxPlatform* platform,
     const SourceNode* fromNode,
@@ -216,7 +232,10 @@ static std::optional<std::pair<std::string, const char*>> computeSourcemapRequir
     const SourceNode* fromService,
     const Luau::ModuleName& target,
     ImportRequireStyle style,
-    const Luau::LanguageServer::AutoImports::AliasMap& availableAliases)
+    const Luau::LanguageServer::AutoImports::AliasMap& availableAliases,
+    const Luau::LanguageServer::AutoImports::ImportRuleSet* rules,
+    const Luau::LanguageServer::AutoImports::ModulePathInfo& fromPaths,
+    const Uri& rootUri)
 {
     auto targetIt = platform->virtualPathsToSourceNodes.find(target);
     if (targetIt == platform->virtualPathsToSourceNodes.end())
@@ -227,7 +246,18 @@ static std::optional<std::pair<std::string, const char*>> computeSourcemapRequir
     if (!targetNode->isScript())
         return std::nullopt;
 
-    if (!isScriptContextCompatible(fromNode->scriptContext, targetNode->scriptContext))
+    if (rules && rules->active())
+    {
+        // Visibility rules are applied by the generic string require importer; only boundary
+        // classification needs the sourcemap-derived script context heuristics available here
+        Luau::LanguageServer::AutoImports::ModulePathInfo targetPaths{"", targetNode->virtualPath};
+        if (auto targetRealPath = platform->getRealPathFromSourceNode(targetNode))
+            targetPaths.fsPath = targetRealPath->lexicallyRelative(rootUri);
+        if (!rules->isBoundaryImportAllowed(
+                fromPaths, boundaryContextOf(fromNode->scriptContext), targetPaths, boundaryContextOf(targetNode->scriptContext)))
+            return std::nullopt;
+    }
+    else if (!isScriptContextCompatible(fromNode->scriptContext, targetNode->scriptContext))
         return std::nullopt;
 
     // Compute absolute path: prefer user-defined aliases, then fall back to @game/<virtual path>
@@ -346,12 +376,22 @@ std::optional<Luau::LanguageServer::AutoImports::RequirePathComputer> RobloxPlat
 
     auto availableAliases = fileResolver->getConfig(from, workspaceFolder->limits).aliases;
 
-    return [this, fromNode, fromAncestors = std::move(fromAncestors), fromService, style,
-               availableAliases = std::move(availableAliases)](
+    auto rules = std::make_shared<const Luau::LanguageServer::AutoImports::ImportRuleSet>(
+        fileResolver->client->getConfiguration(workspaceFolder->rootUri).completion.imports);
+    Luau::LanguageServer::AutoImports::ModulePathInfo fromPaths{};
+    if (rules->active())
+    {
+        if (auto fromRealPath = getRealPathFromSourceNode(fromNode))
+            fromPaths.fsPath = fromRealPath->lexicallyRelative(workspaceFolder->rootUri);
+        fromPaths.dataModelPath = fromNode->virtualPath;
+    }
+
+    return [this, fromNode, fromAncestors = std::move(fromAncestors), fromService, style, availableAliases = std::move(availableAliases),
+               rules = std::move(rules), fromPaths = std::move(fromPaths), rootUri = workspaceFolder->rootUri](
                const Luau::ModuleName& /*from*/, const Luau::ModuleName& target)
         -> std::optional<std::pair<std::string, const char*>>
     {
-        return computeSourcemapRequirePath(this, fromNode, fromAncestors, fromService, target, style, availableAliases);
+        return computeSourcemapRequirePath(this, fromNode, fromAncestors, fromService, target, style, availableAliases, rules.get(), fromPaths, rootUri);
     };
 }
 

@@ -1,5 +1,7 @@
 #include "Platform/StringRequireAutoImporter.hpp"
 
+#include "LSP/AutoImportRules.hpp"
+
 namespace Luau::LanguageServer::AutoImports
 {
 std::string requireNameFromModuleName(const Luau::ModuleName& name)
@@ -110,6 +112,15 @@ std::vector<StringRequireResult> computeAllStringRequires(const StringRequireAut
     auto fromUri = ctx.workspaceFolder->fileResolver.getUri(ctx.from);
     auto availableAliases = ctx.workspaceFolder->fileResolver.getConfig(ctx.from, ctx.workspaceFolder->limits).aliases;
 
+    const ImportRuleSet rules(*ctx.config);
+    ModulePathInfo fromPaths{};
+    if (rules.active())
+    {
+        fromPaths.fsPath = fromUri.lexicallyRelative(ctx.workspaceFolder->rootUri);
+        if (isDataModelPath(ctx.from))
+            fromPaths.dataModelPath = ctx.from;
+    }
+
     auto processModule = [&](const Luau::ModuleName& moduleName)
     {
         auto name = requireNameFromModuleName(moduleName);
@@ -123,6 +134,15 @@ std::vector<StringRequireResult> computeAllStringRequires(const StringRequireAut
         auto uri = ctx.workspaceFolder->fileResolver.getUri(moduleName);
         if (ctx.workspaceFolder->isIgnoredFileForAutoImports(uri))
             return;
+
+        if (rules.active())
+        {
+            // Boundary heuristics for sourcemap-backed modules are applied by the Roblox require path computer
+            ModulePathInfo targetPaths{uri.lexicallyRelative(ctx.workspaceFolder->rootUri),
+                isDataModelPath(moduleName) ? std::optional(moduleName) : std::nullopt};
+            if (!rules.isAutoImportAllowed(fromPaths, BoundaryContext::None, targetPaths, BoundaryContext::None))
+                return;
+        }
 
         std::string require;
         const char* sortText;

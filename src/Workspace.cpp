@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "LSP/AutoImportRules.hpp"
 #include "LSP/Diagnostics.hpp"
 #include "Platform/LSPPlatform.hpp"
 #include "Platform/RobloxPlatform.hpp"
@@ -707,6 +708,9 @@ void WorkspaceFolder::setupWithConfiguration(const ClientConfiguration& configur
 
     if (configuration.index.enabled)
         indexFiles(configuration);
+
+    for (const auto& warning : Luau::LanguageServer::AutoImports::validateAutoImportRules(configuration.completion.imports))
+        client->sendWindowMessage(lsp::MessageType::Warning, "Invalid luau-lsp configuration: " + warning);
 
     client->sendTrace("workspace: setting up with configuration COMPLETED");
 }
