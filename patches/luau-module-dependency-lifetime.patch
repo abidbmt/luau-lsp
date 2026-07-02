@@ -1,0 +1,65 @@
+diff --git a/Analysis/include/Luau/Module.h b/Analysis/include/Luau/Module.h
+index df015f63..3058ba62 100644
+--- a/Analysis/include/Luau/Module.h
++++ b/Analysis/include/Luau/Module.h
+@@ -86,6 +86,14 @@ struct Module
+     TypeArena interfaceTypes;
+     TypeArena internalTypes;
+ 
++    // Our type graph can point into the interface types of the modules we
++    // require, so those modules must be kept alive for as long as we are.
++    // Without this, a stale module that can no longer be rechecked (e.g. its
++    // source file was renamed or deleted, so the frontend cannot re-enqueue
++    // it) dangles into freed arenas once a dependency is rechecked and
++    // replaced in the module resolver.
++    std::vector<ModulePtr> dependencyModules;
++
+     // Scopes and AST types refer to parse data, so we need to keep that alive
+     std::shared_ptr<Allocator> allocator;
+     std::shared_ptr<AstNameTable> names;
+diff --git a/Analysis/src/ConstraintGenerator.cpp b/Analysis/src/ConstraintGenerator.cpp
+index ac5bf6f6..031f4a7f 100644
+--- a/Analysis/src/ConstraintGenerator.cpp
++++ b/Analysis/src/ConstraintGenerator.cpp
+@@ -1537,6 +1537,7 @@ ControlFlow ConstraintGenerator::visit(const ScopePtr& scope, AstStatLocal* stat
+                 continue;
+ 
+             const Name name{statLocal->vars.data[i]->name.value};
++            this->module->dependencyModules.push_back(module);
+             scope->importedTypeBindings[name] = module->exportedTypeBindings;
+             scope->importedModules[name] = moduleInfo->name;
+ 
+diff --git a/Analysis/src/ConstraintSolver.cpp b/Analysis/src/ConstraintSolver.cpp
+index 82342e90..9111d5ce 100644
+--- a/Analysis/src/ConstraintSolver.cpp
++++ b/Analysis/src/ConstraintSolver.cpp
+@@ -4104,6 +4104,8 @@ TypeId ConstraintSolver::resolveModule(const ModuleInfo& info, const Location& l
+         return builtinTypes->errorType;
+     }
+ 
++    this->module->dependencyModules.push_back(module);
++
+     if (module->type != SourceCode::Type::Module)
+     {
+         reportError(IllegalRequire{module->humanReadableName, "Module is not a ModuleScript. It cannot be required."}, location);
+diff --git a/Analysis/src/TypeInfer.cpp b/Analysis/src/TypeInfer.cpp
+index aa829df9..cd4d5ecd 100644
+--- a/Analysis/src/TypeInfer.cpp
++++ b/Analysis/src/TypeInfer.cpp
+@@ -1137,6 +1137,7 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatLocal& local)
+ 
+                     if (ModulePtr module = resolver->getModule(moduleInfo->name))
+                     {
++                        currentModule->dependencyModules.push_back(module);
+                         scope->importedTypeBindings[name] = module->exportedTypeBindings;
+                         scope->importedModules[name] = moduleInfo->name;
+ 
+@@ -5116,6 +5117,8 @@ TypeId TypeChecker::checkRequire(const ScopePtr& scope, const ModuleInfo& module
+         return errorRecoveryType(scope);
+     }
+ 
++    currentModule->dependencyModules.push_back(module);
++
+     if (module->type != SourceCode::Module)
+     {
+         reportError(location, IllegalRequire{module->humanReadableName, "Module is not a ModuleScript.  It cannot be required."});

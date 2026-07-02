@@ -799,4 +799,29 @@ local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.Playerss
 )");
 }
 
+// Regression scaffold for a new-solver use-after-free: after a sourcemap change moves a module,
+// re-checking a consumer replaces the dirty dependency mid-queue and the consumer's solve read
+// freed interface types. Only meaningful under ASAN; asserts nothing beyond surviving
+TEST_CASE_FIXTURE(Fixture, "new_solver_module_replacement_after_sourcemap_change_no_uaf")
+{
+    ENABLE_NEW_SOLVER();
+    loadSourcemap(SOURCEMAP_BEFORE_MOVE);
+    auto aUri = newDocument("shared/Utils/getPlayerId.luau", "return { id = 1 }");
+    auto bUri = newDocument("server/Main.luau", R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local getPlayerId = require(ReplicatedStorage.Utils.getPlayerId)
+return getPlayerId.id
+)");
+    auto aName = workspace.fileResolver.getModuleName(aUri);
+    auto bName = workspace.fileResolver.getModuleName(bUri);
+
+    workspace.checkStrict(bName, /* cancellationToken= */ nullptr, /* forAutocomplete= */ false);
+
+    // Rojo regenerated the sourcemap: getPlayerId moved to another folder; requires are stale
+    loadSourcemap(SOURCEMAP_AFTER_MOVE);
+    workspace.frontend.markDirty(aName);
+    workspace.frontend.markDirty(bName);
+
+    workspace.checkStrict(bName, /* cancellationToken= */ nullptr, /* forAutocomplete= */ false);
+}
+
 TEST_SUITE_END();
