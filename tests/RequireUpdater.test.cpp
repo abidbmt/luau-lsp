@@ -799,6 +799,63 @@ local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.Playerss
 )");
 }
 
+// Renaming a directory and then renaming it back: the frontend still holds a stale source
+// node under the ORIGINAL module names (nothing evicts them), which resolves to the same
+// physical file as the genuinely moved module. The physical-file dedup must not let the
+// stale twin starve the moved module of its own require updates
+TEST_CASE_FIXTURE(Fixture, "renaming_directory_back_still_updates_moved_consumers_own_requires")
+{
+    setApplyEditCapability(this);
+    loadSourcemap(SOURCEMAP_HOOKS_BEFORE);
+
+    std::string systemSource = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHooks)
+)";
+    newDocument("src/EventHooks/PlayersHooks/API.luau", "return {}");
+    newDocument("src/EventHooks/PlayersHooks/System.luau", systemSource);
+    auto deathUri = newDocument("src/Death/System.luau", systemSource);
+
+    auto oldUri = workspace.rootUri.resolvePath("src/EventHooks/PlayersHooks");
+    auto newUri = workspace.rootUri.resolvePath("src/EventHooks/PlayerssHooks");
+
+    // Forward rename: PlayersHooks -> PlayerssHooks, deferred until the sourcemap regenerates
+    workspace.onDidRenameFiles({{oldUri.toString(), newUri.toString()}});
+    loadSourcemap(SOURCEMAP_HOOKS_AFTER);
+    REQUIRE_EQ(client->requestQueue.back().first, "window/showMessageRequest");
+    client->respondToLastRequest(json{{"title", "Update requires"}});
+    REQUIRE_EQ(client->requestQueue.back().first, "workspace/applyEdit");
+
+    // Simulate the client applying the edit: files now live at the new locations with
+    // rewritten requires, and the unmoved consumer's buffer was updated in place
+    std::string renamedSystemSource = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
+)";
+    newDocument("src/EventHooks/PlayerssHooks/API.luau", "return {}");
+    newDocument("src/EventHooks/PlayerssHooks/System.luau", renamedSystemSource);
+    updateDocument(deathUri, renamedSystemSource);
+    workspace.frontend.parse(workspace.fileResolver.getModuleName(deathUri));
+
+    // Rename back: PlayerssHooks -> PlayersHooks
+    workspace.onDidRenameFiles({{newUri.toString(), oldUri.toString()}});
+    loadSourcemap(SOURCEMAP_HOOKS_BEFORE);
+    REQUIRE_EQ(client->requestQueue.back().first, "window/showMessageRequest");
+    client->respondToLastRequest(json{{"title", "Update requires"}});
+
+    REQUIRE_EQ(client->requestQueue.back().first, "workspace/applyEdit");
+    lsp::ApplyWorkspaceEditParams editParams = client->requestQueue.back().second.value();
+
+    // The unmoved consumer is rewritten back
+    REQUIRE_EQ(editParams.edit.changes.count(deathUri), 1);
+    CHECK_EQ(applyEdit(renamedSystemSource, editParams.edit.changes.at(deathUri)), systemSource);
+
+    // The moved consumer's OWN require must also be rewritten back, targeting its restored uri
+    auto restoredSystemUri = workspace.rootUri.resolvePath("src/EventHooks/PlayersHooks/System.luau");
+    REQUIRE_EQ(editParams.edit.changes.count(restoredSystemUri), 1);
+    CHECK_EQ(applyEdit(renamedSystemSource, editParams.edit.changes.at(restoredSystemUri)), systemSource);
+}
+
 // Regression scaffold for a new-solver use-after-free: after a sourcemap change moves a module,
 // re-checking a consumer replaces the dirty dependency mid-queue and the consumer's solve read
 // freed interface types. Only meaningful under ASAN; asserts nothing beyond surviving

@@ -1,5 +1,6 @@
 #include "LSP/RequireUpdater.hpp"
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -429,6 +430,19 @@ RequireUpdateResult computeRequireUpdates(
     std::vector<Luau::ModuleName> moduleNames{};
     for (const auto& [name, _] : workspace.frontend.sourceNodes)
         moduleNames.push_back(name);
+
+    // A stale source node can linger under a module name that resolves to the same physical
+    // file as a genuinely moved module (e.g. renaming A -> B and later back to A: the
+    // pre-rename node for A is never evicted). Process moved modules first so the
+    // physical-file dedup below cannot let a stale twin starve them of their own updates
+    std::stable_partition(moduleNames.begin(), moduleNames.end(),
+        [&](const Luau::ModuleName& name)
+        {
+            if (movedVirtualPaths.count(name) != 0)
+                return true;
+            auto uri = workspace.fileResolver.getUri(name);
+            return uri.scheme == "file" && mapMovedUri(uri, operation).has_value();
+        });
 
     // A moved file can be indexed under both its stale (pre-move) and new module name -
     // process each physical file only once so the edit does not contain overlapping ranges
