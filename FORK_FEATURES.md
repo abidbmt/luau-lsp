@@ -87,8 +87,11 @@ are not.
 - `ignoreGlobs` is unchanged and unconditional. **Migration note**: if you previously used
   `"**/Internal/**"` in `ignoreGlobs` to hide internals (and lost same-feature suggestions),
   move the pattern into a scoped visibility rule instead.
-- Scope resolution tests the *ancestor prefixes* of a candidate's paths against the scope glob;
-  the longest (innermost) matching prefix wins. No `$1` capture syntax is needed.
+- Scope resolution tests the *ancestor prefixes* of a candidate's paths against the scope glob.
+  Every ancestor that matches `scope` and under which the candidate matches `modules` is a scope
+  directory, and the rule is enforced relative to each of them. No `$1` capture syntax is needed.
+  Broad scope globs work: `{ "scope": "src/**", "modules": "**/Internal/**" }` makes any
+  `Internal` folder under `src` private to the directory that contains it, at any depth.
 - Boundary rules and visibility rules compose as independent AND-ed checks — a visibility grant
   can never bypass an execution boundary (a shared file never sees `Server/Internal` modules of
   its own feature).

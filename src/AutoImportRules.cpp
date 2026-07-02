@@ -153,27 +153,25 @@ bool ImportRuleSet::isImportAllowed(BoundaryContext from, BoundaryContext target
     return allowedMatrix[size_t(from)][size_t(target)];
 }
 
-/// Finds the concrete ancestor directory of `paths` matching the scope glob, e.g. resolving the
-/// scope "src/Features/*" to "src/Features/MyFeature". Returns the longest (innermost) matching
-/// prefix across all path representations
-static std::optional<std::string> findScopeDirectory(const ModulePathInfo& paths, const std::string& scopeGlob)
+/// Finds the concrete ancestor directories of `paths` that match the scope glob and under which
+/// the remaining path matches the `modules` glob, e.g. resolving the scope "src/Features/*" to
+/// "src/Features/MyFeature". Broad scope globs like "src/**" can match several nesting levels at
+/// once (each ancestor is a scope directory in its own right), so all applicable directories are
+/// returned and the rule is enforced relative to each of them
+static std::vector<std::string> findScopeDirectories(const ModulePathInfo& paths, const std::string& scopeGlob, const std::string& modulesGlob)
 {
-    std::optional<std::string> best = std::nullopt;
+    std::vector<std::string> directories{};
     for (const auto& representation : pathRepresentations(paths))
     {
-        // Iterate proper ancestor prefixes, innermost first; the first match is the longest for this representation
+        // Iterate proper ancestor prefixes, innermost first
         for (size_t pos = representation.rfind('/'); pos != std::string::npos && pos != 0; pos = representation.rfind('/', pos - 1))
         {
             auto prefix = representation.substr(0, pos);
-            if (glob::gitignore_glob_match(prefix, scopeGlob))
-            {
-                if (!best || prefix.size() > best->size())
-                    best = prefix;
-                break;
-            }
+            if (glob::gitignore_glob_match(prefix, scopeGlob) && glob::gitignore_glob_match(representation.substr(pos + 1), modulesGlob))
+                directories.push_back(std::move(prefix));
         }
     }
-    return best;
+    return directories;
 }
 
 /// Whether any representation of `paths` lies inside `directory` and its remaining path matches `pattern`
@@ -192,13 +190,11 @@ bool ImportRuleSet::isVisibleFrom(const ModulePathInfo& from, const ModulePathIn
     {
         if (rule.scope)
         {
-            auto scopeDirectory = findScopeDirectory(candidate, *rule.scope);
-            if (!scopeDirectory)
-                continue; // candidate is not inside any scope directory - rule does not apply
-            if (!matchesRelativeToDirectory(candidate, *scopeDirectory, rule.modules))
-                continue; // candidate is not restricted by this rule
-            if (!matchesRelativeToDirectory(from, *scopeDirectory, rule.visibleFrom))
-                return false;
+            // The candidate must satisfy `visibleFrom` relative to every scope directory that
+            // restricts it; if none does, the rule does not apply
+            for (const auto& scopeDirectory : findScopeDirectories(candidate, *rule.scope, rule.modules))
+                if (!matchesRelativeToDirectory(from, scopeDirectory, rule.visibleFrom))
+                    return false;
         }
         else
         {

@@ -294,6 +294,29 @@ TEST_CASE("scoped_visibility_rule_restricts_to_owning_scope")
     CHECK(rules.isVisibleFrom({"src/Main.luau"}, {"src/Features/FeatureA/System.luau"}));
 }
 
+TEST_CASE("scoped_visibility_rule_supports_broad_scope_globs")
+{
+    // "src/**" makes every directory under src a potential scope: Internal folders are private
+    // to whatever directory contains them, at any depth
+    ClientCompletionImportsConfiguration config;
+    config.visibilityRules = {{"src/**", "**/Internal/**", ""}};
+    ImportRuleSet rules(config);
+    CHECK(rules.warnings.empty());
+
+    // Files in the containing directory (and deeper) can see the Internal modules
+    CHECK(rules.isVisibleFrom({"src/Features/Combat/System.luau"}, {"src/Features/Combat/Internal/Damage.luau"}));
+    CHECK(rules.isVisibleFrom({"src/Features/Combat/Server/Deep/File.luau"}, {"src/Features/Combat/Internal/Damage.luau"}));
+    // Anything outside the containing directory cannot, including its parents
+    CHECK_FALSE(rules.isVisibleFrom({"src/Features/Other/System.luau"}, {"src/Features/Combat/Internal/Damage.luau"}));
+    CHECK_FALSE(rules.isVisibleFrom({"src/Features/System.luau"}, {"src/Features/Combat/Internal/Damage.luau"}));
+    CHECK_FALSE(rules.isVisibleFrom({"src/Main.luau"}, {"src/Features/Combat/Internal/Damage.luau"}));
+    // The same rule applies at every nesting depth
+    CHECK(rules.isVisibleFrom({"src/Utils/Helper.luau"}, {"src/Utils/Internal/Impl.luau"}));
+    CHECK_FALSE(rules.isVisibleFrom({"src/Features/Combat/System.luau"}, {"src/Utils/Internal/Impl.luau"}));
+    // Non-internal modules remain visible from anywhere
+    CHECK(rules.isVisibleFrom({"src/Main.luau"}, {"src/Features/Combat/System.luau"}));
+}
+
 TEST_CASE("scoped_visibility_rule_matches_datamodel_paths")
 {
     ClientCompletionImportsConfiguration config;
