@@ -407,6 +407,9 @@ bool RobloxPlatform::updateSourceMapFromContents(const std::string& sourceMapCon
 
     workspaceFolder->client->sendTrace("Updating sourcemap contents COMPLETED");
 
+    // The new sourcemap may now contain file locations that pending require updates were waiting for
+    workspaceFolder->processPendingRequireUpdates();
+
     return true;
 }
 

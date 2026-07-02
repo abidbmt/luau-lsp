@@ -143,6 +143,13 @@ void LSPClient::sendWindowMessage(const lsp::MessageType& type, const std::strin
     sendNotification("window/showMessage", params);
 }
 
+void LSPClient::showMessageRequest(
+    const lsp::MessageType& type, const std::string& message, const std::vector<lsp::MessageActionItem>& actions, ResponseHandler handler)
+{
+    lsp::ShowMessageRequestParams params{type, message, actions};
+    sendRequest(nextRequestId++, "window/showMessageRequest", params, handler);
+}
+
 void LSPClient::registerCapability(const std::string& registrationId, const std::string& method, const json& registerOptions)
 {
     lsp::Registration registration{registrationId, method, registerOptions};

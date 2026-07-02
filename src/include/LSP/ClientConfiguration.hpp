@@ -284,6 +284,27 @@ struct ClientIndexConfiguration
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientIndexConfiguration, enabled, maxFiles);
 
+enum struct RequireUpdateMode
+{
+    // NOTE: Prompt is first so that unknown configuration values fall back to prompting
+    // (never silently rewriting)
+    Prompt,
+    Always,
+    Never,
+};
+NLOHMANN_JSON_SERIALIZE_ENUM(RequireUpdateMode, {
+                                                    {RequireUpdateMode::Prompt, "prompt"},
+                                                    {RequireUpdateMode::Always, "always"},
+                                                    {RequireUpdateMode::Never, "never"},
+                                                })
+
+struct ClientFileOperationsConfiguration
+{
+    /// How require statements referencing a moved or renamed file should be updated
+    RequireUpdateMode updateRequiresOnMove = RequireUpdateMode::Prompt;
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFileOperationsConfiguration, updateRequiresOnMove);
+
 struct ClientFFlagsConfiguration
 {
     // NOTE: THE ENABLEBYDEFAULT AND SYNC FLAGS ARE INVERTED IN THE VSCODE DEFAULTS
@@ -377,6 +398,7 @@ struct ClientConfiguration
     ClientBytecodeConfiguration bytecode{};
     ClientFormatConfiguration format{};
     ClientPluginConfiguration plugins{};
+    ClientFileOperationsConfiguration fileOperations{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientConfiguration, autocompleteEnd, ignoreGlobs, platform, sourcemap, diagnostics, types,
-    inlayHints, hover, completion, signatureHelp, require, index, fflags, bytecode, format, plugins);
+    inlayHints, hover, completion, signatureHelp, require, index, fflags, bytecode, format, plugins, fileOperations);

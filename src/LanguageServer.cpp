@@ -10,6 +10,7 @@
 #include "LSP/Uri.hpp"
 #include "LSP/DocumentationParser.hpp"
 #include "LSP/Diagnostics.hpp"
+#include "LSP/RequireUpdater.hpp"
 
 #ifdef LSP_BUILD_WITH_SENTRY
 // sentry.h pulls in <windows.h>
@@ -154,7 +155,14 @@ lsp::ServerCapabilities LanguageServer::getServerCapabilities()
     capabilities.documentOnTypeFormattingProvider = lsp::DocumentOnTypeFormattingOptions{"{", std::nullopt};
     // Workspaces
     lsp::WorkspaceFoldersServerCapabilities workspaceFolderCapabilities{true, false};
-    capabilities.workspace = lsp::WorkspaceCapabilities{workspaceFolderCapabilities};
+    // File Operations: notify us when files/folders are renamed so requires can be updated
+    lsp::FileOperationRegistrationOptions didRenameOptions;
+    didRenameOptions.filters = {
+        lsp::FileOperationFilter{std::nullopt, lsp::FileOperationPattern{"**/*.{lua,luau}", lsp::FileOperationPatternKind::File}},
+        lsp::FileOperationFilter{std::nullopt, lsp::FileOperationPattern{"**", lsp::FileOperationPatternKind::Folder}},
+    };
+    lsp::FileOperationsServerCapabilities fileOperationsCapabilities{didRenameOptions, std::nullopt};
+    capabilities.workspace = lsp::WorkspaceCapabilities{workspaceFolderCapabilities, fileOperationsCapabilities};
     return capabilities;
 }
 
@@ -401,6 +409,17 @@ void LanguageServer::onRequest(const id_type& id, const std::string& method, std
             throw JsonRpcException(lsp::ErrorCode::RequestFailed, "No managed text document for " + params.textDocument.uri.toString());
         response = textDocument->getText();
     }
+    else if (method == "luau-lsp/updateRequiresForRename")
+    {
+        ASSERT_PARAMS(baseParams, "luau-lsp/updateRequiresForRename")
+        auto params = baseParams->get<lsp::UpdateRequiresForRenameParams>();
+        auto workspace = findWorkspace(params.oldUri);
+        auto operation = Luau::LanguageServer::RequireUpdates::captureRenameOperation(*workspace, params.oldUri, params.newUri);
+        auto result = Luau::LanguageServer::RequireUpdates::computeRequireUpdates(*workspace, operation, params.uris);
+        for (const auto& skipped : result.skipped)
+            client->sendLogMessage(lsp::MessageType::Warning, "Require not updated: " + skipped);
+        response = result.edit;
+    }
     else
     {
         throw JsonRpcException(lsp::ErrorCode::MethodNotFound, "method not found / supported: " + method);
@@ -470,6 +489,10 @@ void LanguageServer::onNotification(const std::string& method, std::optional<jso
     else if (method == "workspace/didChangeWatchedFiles")
     {
         onDidChangeWatchedFiles(JSON_REQUIRED_PARAMS(params, "workspace/didChangeWatchedFiles"));
+    }
+    else if (method == "workspace/didRenameFiles")
+    {
+        onDidRenameFiles(JSON_REQUIRED_PARAMS(params, "workspace/didRenameFiles"));
     }
     else
     {
@@ -935,6 +958,25 @@ void LanguageServer::onDidChangeWatchedFiles(const lsp::DidChangeWatchedFilesPar
 
     for (const auto& [workspace, changes] : workspaceChanges)
         workspace->onDidChangeWatchedFiles(changes);
+}
+
+void LanguageServer::onDidRenameFiles(const lsp::RenameFilesParams& params)
+{
+    Luau::DenseHashMap<WorkspaceFolderPtr, std::vector<lsp::FileRename>> workspaceRenames{nullptr};
+
+    for (const auto& file : params.files)
+    {
+        auto workspace = findWorkspace(Uri::parse(file.oldUri), /* shouldInitialize= */ false);
+        if (!workspace->isReady)
+            continue;
+
+        if (!workspaceRenames.find(workspace))
+            workspaceRenames[workspace] = {};
+        workspaceRenames[workspace].push_back(file);
+    }
+
+    for (const auto& [workspace, renames] : workspaceRenames)
+        workspace->onDidRenameFiles(renames);
 }
 
 void LanguageServer::shutdown()

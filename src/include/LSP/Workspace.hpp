@@ -10,6 +10,7 @@
 #include "Protocol/SemanticTokens.hpp"
 #include "Protocol/Extensions.hpp"
 #include "LSP/Client.hpp"
+#include "LSP/RequireUpdater.hpp"
 #include "LSP/WorkspaceFileResolver.hpp"
 
 using LSPCancellationToken = std::shared_ptr<Luau::FrontendCancellationToken>;
@@ -95,6 +96,12 @@ public:
 
     void onDidChangeWatchedFiles(const std::vector<lsp::FileEvent>& changes);
 
+    /// Handles `workspace/didRenameFiles`: computes and (depending on configuration) prompts for
+    /// or applies require updates for the renamed files
+    void onDidRenameFiles(const std::vector<lsp::FileRename>& renames);
+    /// Recomputes require updates that were waiting for a sourcemap regeneration
+    void processPendingRequireUpdates();
+
     /// Whether the file has been marked as ignored by any of the ignored lists in the configuration
     bool isIgnoredFile(const Uri& uri, const std::optional<ClientConfiguration>& givenConfig = std::nullopt) const;
     /// Whether the file has been marked as ignored for auto-importing
@@ -129,6 +136,13 @@ public:
         const std::string& packageName, const std::string& source, std::optional<nlohmann::json> metadata = std::nullopt);
 
 private:
+    /// Rename operations awaiting a sourcemap regeneration before their require updates can be computed
+    std::vector<Luau::LanguageServer::RequireUpdates::RenameOperation> pendingRequireUpdates{};
+
+    /// Computes require updates for a rename and, depending on configuration and client
+    /// capabilities, applies them, prompts, or defers until the next sourcemap update
+    void applyOrPromptRequireUpdates(Luau::LanguageServer::RequireUpdates::RenameOperation operation, bool allowDefer);
+
     void registerTypes(const std::vector<std::string>& disabledGlobals);
     void endAutocompletion(const lsp::CompletionParams& params);
     void suggestImports(const Luau::ModuleName& moduleName, const Luau::Position& position, const ClientConfiguration& config,

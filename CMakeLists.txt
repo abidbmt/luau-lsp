@@ -96,6 +96,7 @@ target_sources(Luau.LanguageServer PRIVATE
         src/operations/CallHierarchy.cpp
         src/operations/Bytecode.cpp
         src/operations/RequireGraph.cpp
+        src/operations/RequireUpdater.cpp
         src/operations/OnTypeFormatting.cpp
         src/transport/PipeTransport.cpp
         src/transport/StdioTransport.cpp
@@ -133,6 +134,7 @@ target_sources(Luau.LanguageServer.Test PRIVATE
         tests/Sourcemap.test.cpp
         tests/References.test.cpp
         tests/Rename.test.cpp
+        tests/RequireUpdater.test.cpp
         tests/ColorProvider.test.cpp
         tests/LuauExt.test.cpp
         tests/CliConfigurationParser.test.cpp

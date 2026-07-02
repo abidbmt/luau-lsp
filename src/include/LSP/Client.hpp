@@ -31,6 +31,9 @@ struct Client
     Luau::DocumentationDatabase documentation{""};
     /// Global configuration. These are the default settings that we will use if we don't have the workspace stored in configStore
     ClientConfiguration globalConfig{};
+    /// Session-level override of `fileOperations.updateRequiresOnMove`, set when the user picks
+    /// "always" / "never" in the require-update prompt
+    std::optional<RequireUpdateMode> requireUpdateModeOverride = std::nullopt;
 
     virtual ClientConfiguration getConfiguration(const lsp::DocumentUri& uri) = 0;
 
@@ -46,6 +49,13 @@ struct Client
     virtual void sendTrace(const std::string& message, const std::optional<std::string>& verbose = std::nullopt) const {}
 
     virtual void sendWindowMessage(const lsp::MessageType& type, const std::string& message) const {}
+
+    /// Sends a `window/showMessageRequest` to the client. The handler receives the raw response
+    /// message; a null result indicates the user dismissed the prompt
+    virtual void showMessageRequest(
+        const lsp::MessageType& type, const std::string& message, const std::vector<lsp::MessageActionItem>& actions, ResponseHandler handler)
+    {
+    }
 
     virtual void registerCapability(const std::string& registrationId, const std::string& method, const json& registerOptions) {}
 
@@ -125,6 +135,8 @@ public:
     void sendLogMessage(const lsp::MessageType& type, const std::string& message) const override;
     void sendTrace(const std::string& message, const std::optional<std::string>& verbose = std::nullopt) const override;
     void sendWindowMessage(const lsp::MessageType& type, const std::string& message) const override;
+    void showMessageRequest(const lsp::MessageType& type, const std::string& message, const std::vector<lsp::MessageActionItem>& actions,
+        ResponseHandler handler) override;
 
     void registerCapability(const std::string& registrationId, const std::string& method, const json& registerOptions) override;
     void unregisterCapability(const std::string& registrationId, const std::string& method) override;

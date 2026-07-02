@@ -82,6 +82,7 @@ private:
     void onDidChangeConfiguration(const lsp::DidChangeConfigurationParams& params);
     void onDidChangeWorkspaceFolders(const lsp::DidChangeWorkspaceFoldersParams& params);
     void onDidChangeWatchedFiles(const lsp::DidChangeWatchedFilesParams& params);
+    void onDidRenameFiles(const lsp::RenameFilesParams& params);
 
     std::vector<lsp::DocumentLink> documentLink(const lsp::DocumentLinkParams& params);
     lsp::DocumentColorResult documentColor(const lsp::DocumentColorParams& params);
