@@ -6,6 +6,7 @@
 
 #include "Protocol/SemanticTokens.hpp"
 #include "Protocol/CodeAction.hpp"
+#include "Protocol/Workspace.hpp"
 
 namespace lsp
 {
@@ -86,12 +87,21 @@ struct WorkspaceFoldersServerCapabilities
 };
 NLOHMANN_DEFINE_OPTIONAL(WorkspaceFoldersServerCapabilities, supported, changeNotifications);
 
+struct FileOperationsServerCapabilities
+{
+    /// The server is interested in receiving didRenameFiles notifications
+    std::optional<FileOperationRegistrationOptions> didRename = std::nullopt;
+    /// The server is interested in receiving willRenameFiles requests
+    std::optional<FileOperationRegistrationOptions> willRename = std::nullopt;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationsServerCapabilities, didRename, willRename);
+
 struct WorkspaceCapabilities
 {
     std::optional<WorkspaceFoldersServerCapabilities> workspaceFolders = std::nullopt;
-    // fileOperations
+    std::optional<FileOperationsServerCapabilities> fileOperations = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(WorkspaceCapabilities, workspaceFolders);
+NLOHMANN_DEFINE_OPTIONAL(WorkspaceCapabilities, workspaceFolders, fileOperations);
 
 struct CompletionOptions
 {

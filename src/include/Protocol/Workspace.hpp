@@ -83,6 +83,55 @@ struct DidChangeWorkspaceFoldersParams
 };
 NLOHMANN_DEFINE_OPTIONAL(DidChangeWorkspaceFoldersParams, event)
 
+enum struct FileOperationPatternKind
+{
+    File,
+    Folder,
+};
+NLOHMANN_JSON_SERIALIZE_ENUM(FileOperationPatternKind, {
+                                                           {FileOperationPatternKind::File, "file"},
+                                                           {FileOperationPatternKind::Folder, "folder"},
+                                                       })
+
+struct FileOperationPattern
+{
+    std::string glob;
+    std::optional<FileOperationPatternKind> matches = std::nullopt;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationPattern, glob, matches)
+
+struct FileOperationFilter
+{
+    std::optional<std::string> scheme = std::nullopt;
+    FileOperationPattern pattern;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationFilter, scheme, pattern)
+
+struct FileOperationRegistrationOptions
+{
+    std::vector<FileOperationFilter> filters{};
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationRegistrationOptions, filters)
+
+/// Represents information on a file/folder rename
+struct FileRename
+{
+    /// A file:// URI for the original location of the file/folder being renamed
+    std::string oldUri;
+    /// A file:// URI for the new location of the file/folder being renamed
+    std::string newUri;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileRename, oldUri, newUri)
+
+/// The parameters sent in notifications/requests for user-initiated renames of files
+struct RenameFilesParams
+{
+    /// An array of all files/folders renamed in this operation. When a folder is renamed,
+    /// only the folder will be included, and not its children
+    std::vector<FileRename> files{};
+};
+NLOHMANN_DEFINE_OPTIONAL(RenameFilesParams, files)
+
 struct ApplyWorkspaceEditParams
 {
     std::optional<std::string> label = std::nullopt;

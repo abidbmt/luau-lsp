@@ -451,8 +451,42 @@ struct DiagnosticWorkspaceClientCapabilities
 };
 NLOHMANN_DEFINE_OPTIONAL(DiagnosticWorkspaceClientCapabilities, refreshSupport)
 
+struct FileOperationsClientCapabilities
+{
+    /**
+     * Whether the client supports dynamic registration for file
+     * requests/notifications.
+     */
+    bool dynamicRegistration = false;
+
+    /**
+     * The client has support for sending didRenameFiles notifications.
+     */
+    bool didRename = false;
+
+    /**
+     * The client has support for sending willRenameFiles requests.
+     */
+    bool willRename = false;
+};
+NLOHMANN_DEFINE_OPTIONAL(FileOperationsClientCapabilities, dynamicRegistration, didRename, willRename)
+
 struct ClientWorkspaceCapabilities
 {
+    /**
+     * The client supports applying batch edits
+     * to the workspace by supporting the request
+     * 'workspace/applyEdit'
+     */
+    bool applyEdit = false;
+
+    /**
+     * The client has support for file requests/notifications.
+     *
+     * @since 3.16.0
+     */
+    std::optional<FileOperationsClientCapabilities> fileOperations = std::nullopt;
+
     /**
      * Capabilities specific to the `workspace/didChangeConfiguration`
      * notification.
@@ -486,7 +520,8 @@ struct ClientWorkspaceCapabilities
      */
     std::optional<DiagnosticWorkspaceClientCapabilities> diagnostics = std::nullopt;
 };
-NLOHMANN_DEFINE_OPTIONAL(ClientWorkspaceCapabilities, didChangeConfiguration, didChangeWatchedFiles, configuration, inlayHint, diagnostics)
+NLOHMANN_DEFINE_OPTIONAL(
+    ClientWorkspaceCapabilities, applyEdit, fileOperations, didChangeConfiguration, didChangeWatchedFiles, configuration, inlayHint, diagnostics)
 
 struct ClientGeneralCapabilities
 {

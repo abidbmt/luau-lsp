@@ -77,4 +77,18 @@ struct InternalSourceParams
 NLOHMANN_DEFINE_OPTIONAL(InternalSourceParams, textDocument)
 
 using InternalSourceResult = std::string;
+
+struct UpdateRequiresForRenameParams
+{
+    /// The original location of the renamed file/folder
+    DocumentUri oldUri;
+    /// The new location of the renamed file/folder
+    DocumentUri newUri;
+    /// When provided, only requires inside these files are updated
+    std::optional<std::vector<DocumentUri>> uris = std::nullopt;
+};
+NLOHMANN_DEFINE_OPTIONAL(UpdateRequiresForRenameParams, oldUri, newUri, uris)
+
+/// Returns the WorkspaceEdit rewriting affected requires (not applied automatically)
+using UpdateRequiresForRenameResult = WorkspaceEdit;
 } // namespace lsp
