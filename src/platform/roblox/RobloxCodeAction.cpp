@@ -3,6 +3,7 @@
 #include "LSP/Workspace.hpp"
 #include "LSP/Utils.hpp"
 #include "Platform/AutoImports.hpp"
+#include "Platform/ImportSections.hpp"
 #include "Luau/PrettyPrinter.h"
 #include "Platform/InstanceRequireAutoImporter.hpp"
 
@@ -96,10 +97,13 @@ void RobloxPlatform::handleUnknownSymbolFix(const UnknownSymbolFixContext& ctx, 
     bool foundServiceMatch = contains(services, unknownSymbol.name) && !contains(importsVisitor.serviceLineMap, unknownSymbol.name);
     if (foundServiceMatch)
     {
-        size_t lineNumber = importsVisitor.findBestLineForService(unknownSymbol.name, hotCommentsLineNumber);
+        const auto sections = Luau::LanguageServer::AutoImports::detectImportSections(*ctx.textDocument, config.completion.imports.sections);
+        size_t lineNumber = Luau::LanguageServer::AutoImports::sectionClamp(sections.services,
+            importsVisitor.findBestLineForService(
+                unknownSymbol.name, Luau::LanguageServer::AutoImports::sectionMinimum(sections.services, hotCommentsLineNumber)));
 
         bool appendNewline = false;
-        if (config.completion.imports.separateGroupsWithLine && importsVisitor.firstRequireLine &&
+        if (config.completion.imports.separateGroupsWithLine && !sections.services && importsVisitor.firstRequireLine &&
             importsVisitor.firstRequireLine.value() - lineNumber == 0)
             appendNewline = true;
 
@@ -193,16 +197,19 @@ std::vector<lsp::TextEdit> RobloxPlatform::computeAddAllMissingImportsEdits(
     // Handle symbols as services
     std::optional<RobloxDefinitionsFileMetadata> metadata = workspaceFolder->definitionsFileMetadata;
     auto services = metadata.has_value() ? metadata->SERVICES : std::vector<std::string>{};
+    const auto sections = Luau::LanguageServer::AutoImports::detectImportSections(*ctx.textDocument, config.completion.imports.sections);
     for (const auto& symbolName : unknownSymbols)
     {
         if (std::find(services.begin(), services.end(), symbolName) != services.end())
         {
             if (!contains(importsVisitor.serviceLineMap, symbolName) && !addedServices.count(symbolName))
             {
-                size_t lineNumber = importsVisitor.findBestLineForService(symbolName, hotCommentsLineNumber);
+                size_t lineNumber = Luau::LanguageServer::AutoImports::sectionClamp(sections.services,
+                    importsVisitor.findBestLineForService(
+                        symbolName, Luau::LanguageServer::AutoImports::sectionMinimum(sections.services, hotCommentsLineNumber)));
 
                 bool appendNewline = false;
-                if (config.completion.imports.separateGroupsWithLine && importsVisitor.firstRequireLine &&
+                if (config.completion.imports.separateGroupsWithLine && !sections.services && importsVisitor.firstRequireLine &&
                     importsVisitor.firstRequireLine.value() - lineNumber == 0)
                     appendNewline = true;
 

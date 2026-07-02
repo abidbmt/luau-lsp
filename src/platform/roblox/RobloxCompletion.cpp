@@ -6,6 +6,7 @@
 #include "LSP/Completion.hpp"
 
 #include "Platform/AutoImports.hpp"
+#include "Platform/ImportSections.hpp"
 #include "Platform/InstanceRequireAutoImporter.hpp"
 #include "Platform/StringRequireAutoImporter.hpp"
 
@@ -253,6 +254,8 @@ void RobloxPlatform::handleSuggestImports(const TextDocument& textDocument, cons
     {
         std::optional<RobloxDefinitionsFileMetadata> metadata = workspaceFolder->definitionsFileMetadata;
 
+        const auto sections = Luau::LanguageServer::AutoImports::detectImportSections(textDocument, config.completion.imports.sections);
+
         auto services = metadata.has_value() ? metadata->SERVICES : std::vector<std::string>{};
         for (auto& service : services)
         {
@@ -264,10 +267,12 @@ void RobloxPlatform::handleSuggestImports(const TextDocument& textDocument, cons
                 contains(config.completion.imports.excludedServices, service))
                 continue;
 
-            size_t lineNumber = importsVisitor.findBestLineForService(service, hotCommentsLineNumber);
+            size_t lineNumber = Luau::LanguageServer::AutoImports::sectionClamp(sections.services,
+                importsVisitor.findBestLineForService(
+                    service, Luau::LanguageServer::AutoImports::sectionMinimum(sections.services, hotCommentsLineNumber)));
 
             bool appendNewline = false;
-            if (config.completion.imports.separateGroupsWithLine && importsVisitor.firstRequireLine &&
+            if (config.completion.imports.separateGroupsWithLine && !sections.services && importsVisitor.firstRequireLine &&
                 importsVisitor.firstRequireLine.value() - lineNumber == 0)
                 appendNewline = true;
 

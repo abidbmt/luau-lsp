@@ -1,6 +1,7 @@
 #include "Platform/StringRequireAutoImporter.hpp"
 
 #include "LSP/AutoImportRules.hpp"
+#include "Platform/ImportSections.hpp"
 
 namespace Luau::LanguageServer::AutoImports
 {
@@ -109,6 +110,9 @@ std::vector<StringRequireResult> computeAllStringRequires(const StringRequireAut
     std::vector<StringRequireResult> result;
     size_t minimumLineNumber = computeMinimumLineNumberForRequire(*ctx.importsVisitor, ctx.hotCommentsLineNumber);
 
+    const auto sections = detectImportSections(*ctx.textDocument, ctx.config->sections);
+    minimumLineNumber = sectionMinimum(sections.modules, minimumLineNumber);
+
     auto fromUri = ctx.workspaceFolder->fileResolver.getUri(ctx.from);
     auto availableAliases = ctx.workspaceFolder->fileResolver.getConfig(ctx.from, ctx.workspaceFolder->limits).aliases;
 
@@ -158,9 +162,9 @@ std::vector<StringRequireResult> computeAllStringRequires(const StringRequireAut
             std::tie(require, sortText) = computeRequirePath(fromUri, uri, availableAliases, ctx.config->requireStyle);
         }
 
-        size_t lineNumber = computeBestLineForRequire(*ctx.importsVisitor, *ctx.textDocument, require, minimumLineNumber);
+        size_t lineNumber = sectionClamp(sections.modules, computeBestLineForRequire(*ctx.importsVisitor, *ctx.textDocument, require, minimumLineNumber));
 
-        bool prependNewline = ctx.config->separateGroupsWithLine && ctx.importsVisitor->shouldPrependNewline(lineNumber);
+        bool prependNewline = ctx.config->separateGroupsWithLine && !sections.modules && ctx.importsVisitor->shouldPrependNewline(lineNumber);
 
         result.emplace_back(StringRequireResult{
             name,

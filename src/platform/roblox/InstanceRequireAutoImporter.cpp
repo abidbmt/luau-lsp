@@ -2,6 +2,7 @@
 
 #include "LSP/AutoImportRules.hpp"
 #include "LSP/Completion.hpp"
+#include "Platform/ImportSections.hpp"
 #include "Platform/RobloxPlatform.hpp"
 
 namespace Luau::LanguageServer::AutoImports
@@ -49,6 +50,9 @@ std::vector<InstanceRequireResult> computeAllInstanceRequires(const InstanceRequ
 {
     std::vector<InstanceRequireResult> results;
     size_t minimumLineNumber = computeMinimumLineNumberForRequire(*ctx.importsVisitor, ctx.hotCommentsLineNumber);
+
+    const auto sections = detectImportSections(*ctx.textDocument, ctx.config->sections);
+    minimumLineNumber = sectionMinimum(sections.modules, minimumLineNumber);
 
     ScriptContext callerContext = ScriptContext::Shared;
     if (auto it = ctx.platform->virtualPathsToSourceNodes.find(ctx.from); it != ctx.platform->virtualPathsToSourceNodes.end())
@@ -105,7 +109,7 @@ std::vector<InstanceRequireResult> computeAllInstanceRequires(const InstanceRequ
 
         auto require = convertToScriptPath(requirePath);
 
-        size_t lineNumber = computeBestLineForRequire(*ctx.importsVisitor, *ctx.textDocument, require, minimumLineNumber);
+        size_t lineNumber = sectionClamp(sections.modules, computeBestLineForRequire(*ctx.importsVisitor, *ctx.textDocument, require, minimumLineNumber));
 
         if (!isRelative)
         {
@@ -114,18 +118,20 @@ std::vector<InstanceRequireResult> computeAllInstanceRequires(const InstanceRequ
             auto service = requirePath.substr(0, requirePath.find('/'));
             if (!contains(ctx.importsVisitor->serviceLineMap, service))
             {
-                auto serviceLineNumber = ctx.importsVisitor->findBestLineForService(service, ctx.hotCommentsLineNumber);
+                auto serviceLineNumber = sectionClamp(sections.services,
+                    ctx.importsVisitor->findBestLineForService(service, sectionMinimum(sections.services, ctx.hotCommentsLineNumber)));
                 bool appendNewline = false;
                 // If there is no firstRequireLine, then the require that we insert will become the first require,
                 // so we use `.value_or(serviceLineNumber)` to ensure it equals 0 and a newline is added
-                if (ctx.config->separateGroupsWithLine && ctx.importsVisitor->firstRequireLine.value_or(serviceLineNumber) - serviceLineNumber == 0)
+                if (ctx.config->separateGroupsWithLine && !sections.services &&
+                    ctx.importsVisitor->firstRequireLine.value_or(serviceLineNumber) - serviceLineNumber == 0)
                     appendNewline = true;
                 serviceEdit = {service, createServiceTextEdit(service, serviceLineNumber, appendNewline, ctx.config->useConst)};
             }
         }
 
         // Whether we need to add a newline before the require to separate it from the services
-        bool prependNewline = ctx.config->separateGroupsWithLine && ctx.importsVisitor->shouldPrependNewline(lineNumber);
+        bool prependNewline = ctx.config->separateGroupsWithLine && !sections.modules && ctx.importsVisitor->shouldPrependNewline(lineNumber);
 
         results.emplace_back(InstanceRequireResult{
             name,

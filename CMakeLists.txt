@@ -62,6 +62,7 @@ target_sources(Luau.LanguageServer PRIVATE
         src/CliConfigurationParser.cpp
         src/AutoImportRules.cpp
         src/platform/AutoImports.cpp
+        src/platform/ImportSections.cpp
         src/platform/LSPPlatform.cpp
         src/platform/StringRequireAutoImporter.cpp
         src/platform/StringRequireSuggester.cpp
@@ -120,6 +121,7 @@ target_sources(Luau.LanguageServer.Test PRIVATE
         tests/Autocomplete.test.cpp
         tests/AutoImports.test.cpp
         tests/AutoImportRules.test.cpp
+        tests/ImportSections.test.cpp
         tests/Bytecode.test.cpp
         tests/MagicFunctions.test.cpp
         tests/Documentation.test.cpp

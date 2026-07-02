@@ -158,6 +158,17 @@ struct ClientCompletionImportsBoundariesConfiguration
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsBoundariesConfiguration, rules, allowedImports);
 
+struct ClientCompletionImportsSectionsConfiguration
+{
+    /// Regex matched against each line to locate the section heading under which generated
+    /// `game:GetService(...)` declarations are inserted (e.g. "^--\\s*Services")
+    std::string services = "";
+    /// Regex matched against each line to locate the section heading under which generated
+    /// `require(...)` declarations are inserted (e.g. "^--\\s*Modules")
+    std::string modules = "";
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsSectionsConfiguration, services, modules);
+
 struct ClientCompletionImportsVisibilityRule
 {
     /// Optional scope glob matched against ancestor directories of a candidate module. When set, `modules` and
@@ -196,9 +207,11 @@ struct ClientCompletionImportsConfiguration
     ClientCompletionImportsBoundariesConfiguration boundaries{};
     /// Contextual visibility rules restricting where certain modules may be auto-imported from
     std::vector<ClientCompletionImportsVisibilityRule> visibilityRules{};
+    /// Comment section headings that generated service / require declarations are inserted under
+    ClientCompletionImportsSectionsConfiguration sections{};
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientCompletionImportsConfiguration, enabled, suggestServices, includedServices, excludedServices,
-    suggestRequires, requireStyle, stringRequires, separateGroupsWithLine, ignoreGlobs, useConst, boundaries, visibilityRules);
+    suggestRequires, requireStyle, stringRequires, separateGroupsWithLine, ignoreGlobs, useConst, boundaries, visibilityRules, sections);
 
 struct ClientCompletionAnonymousAutofillConfiguration
 {
