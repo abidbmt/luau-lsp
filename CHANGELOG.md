@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added configurable execution boundaries for auto-imports via `luau-lsp.completion.imports.boundaries.rules` and `luau-lsp.completion.imports.boundaries.allowedImports`. Boundary globs match both workspace-relative file paths and Roblox DataModel paths, so client-only code placed in `ReplicatedStorage` (e.g. via `RunContext`) can be hidden from server and shared code. When any rule is configured, a strict import matrix applies by default (client ← client/shared, server ← server/shared, shared ← shared); the matrix is fully configurable. Without configuration, existing behaviour is preserved
+- Added contextual auto-import visibility rules via `luau-lsp.completion.imports.visibilityRules`, supporting feature-private / package-private module patterns (e.g. `Internal` directories visible only within their owning feature) via scoped globs. Boundary rules always take precedence over visibility grants
+- Added section-aware auto-import insertion via `luau-lsp.completion.imports.sections.services` and `luau-lsp.completion.imports.sections.modules`: generated `game:GetService(...)` and `require(...)` declarations are inserted under configurable comment headings (e.g. `-- Services`, `-- Modules`) instead of the top of the file, falling back to the default position when the headings are absent
+- Added require updating when files or folders are moved/renamed (via `workspace/didRenameFiles`). Affected requires are rewritten preserving their existing style (service-based, `script`-relative, string relative/aliased), with a prompt offering Update / Skip / Always / Never (configurable via `luau-lsp.fileOperations.updateRequiresOnMove`). On the Roblox platform, updates wait for the next sourcemap regeneration when needed. Clients without prompt support can use the `luau-lsp/updateRequiresForRename` request instead
+- Invalid auto-import boundary/visibility/section configuration now produces `window/showMessage` warnings instead of being silently ignored
+
 ### Changed
 
 - Sync to upstream Luau 0.726
