@@ -137,7 +137,7 @@ RenameOperation captureRenameOperation(WorkspaceFolder& workspace, const Uri& ol
                 continue;
             if (auto realPath = robloxPlatform->getRealPathFromSourceNode(node))
                 if (auto mapped = mapMovedUri(*realPath, operation))
-                    operation.movedInstanceModules.push_back({virtualPath, *mapped});
+                    operation.movedInstanceModules.push_back({virtualPath, *realPath, *mapped});
         }
     }
 
@@ -430,9 +430,22 @@ RequireUpdateResult computeRequireUpdates(
     for (const auto& [name, _] : workspace.frontend.sourceNodes)
         moduleNames.push_back(name);
 
+    // A moved file can be indexed under both its stale (pre-move) and new module name -
+    // process each physical file only once so the edit does not contain overlapping ranges
+    std::unordered_set<Uri, UriHash> processedFiles{};
+
     for (const auto& moduleName : moduleNames)
     {
         auto fromUriOld = workspace.fileResolver.getUri(moduleName);
+
+        // A moved module may still be indexed under its old virtual path, which no longer
+        // resolves against the regenerated sourcemap - fall back to the location captured
+        // at rename time so its own requires are updated too
+        if (robloxPlatform && robloxPlatform->isVirtualPath(moduleName))
+            for (const auto& moved : operation.movedInstanceModules)
+                if (moved.oldVirtualPath == moduleName)
+                    fromUriOld = moved.oldRealUri;
+
         if (fromUriOld.scheme != "file")
             continue;
 
@@ -441,6 +454,8 @@ RequireUpdateResult computeRequireUpdates(
             continue;
 
         auto fromUriNew = mapMovedUri(fromUriOld, operation).value_or(fromUriOld);
+        if (!processedFiles.insert(fromUriNew).second)
+            continue;
 
         // Locate the document text (needed for UTF-16 ranges and existing require text)
         const TextDocument* textDocument = workspace.fileResolver.getTextDocument(fromUriNew);

@@ -18,6 +18,8 @@ struct MovedInstanceModule
 {
     /// The DataModel path of the module before the move (e.g. "game/ReplicatedStorage/Utils/Module")
     std::string oldVirtualPath;
+    /// Where the module's file lived before the move
+    Uri oldRealUri;
     /// Where the module's file lives after the move
     Uri newRealUri;
 };

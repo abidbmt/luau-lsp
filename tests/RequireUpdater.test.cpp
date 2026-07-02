@@ -676,4 +676,127 @@ local getPlayerId = require(ReplicatedStorage.Players.getPlayerId)
 )");
 }
 
+// Mirrors a Rojo project that pins instance names per file: renaming the folder on disk is
+// accompanied by renaming the instances in the project file, and one of the moved modules
+// itself requires its moved sibling
+static const std::string SOURCEMAP_HOOKS_BEFORE = R"(
+{
+    "name": "game",
+    "className": "DataModel",
+    "children": [
+        {
+            "name": "ReplicatedStorage",
+            "className": "ReplicatedStorage",
+            "children": [
+                {
+                    "name": "EventHooks",
+                    "className": "Folder",
+                    "children": [
+                        {
+                            "name": "PlayersHooks",
+                            "className": "Folder",
+                            "children": [
+                                {"name": "PlayersHooks", "className": "ModuleScript", "filePaths": ["src/EventHooks/PlayersHooks/API.luau"]},
+                                {"name": "PlayersHooksSystem", "className": "ModuleScript", "filePaths": ["src/EventHooks/PlayersHooks/System.luau"]}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "ServerScriptService",
+            "className": "ServerScriptService",
+            "children": [
+                {"name": "DeathSystem", "className": "ModuleScript", "filePaths": ["src/Death/System.luau"]}
+            ]
+        }
+    ]
+}
+)";
+
+static const std::string SOURCEMAP_HOOKS_AFTER = R"(
+{
+    "name": "game",
+    "className": "DataModel",
+    "children": [
+        {
+            "name": "ReplicatedStorage",
+            "className": "ReplicatedStorage",
+            "children": [
+                {
+                    "name": "EventHooks",
+                    "className": "Folder",
+                    "children": [
+                        {
+                            "name": "PlayerssHooks",
+                            "className": "Folder",
+                            "children": [
+                                {"name": "PlayerssHooks", "className": "ModuleScript", "filePaths": ["src/EventHooks/PlayerssHooks/API.luau"]},
+                                {"name": "PlayerssHooksSystem", "className": "ModuleScript", "filePaths": ["src/EventHooks/PlayerssHooks/System.luau"]}
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "ServerScriptService",
+            "className": "ServerScriptService",
+            "children": [
+                {"name": "DeathSystem", "className": "ModuleScript", "filePaths": ["src/Death/System.luau"]}
+            ]
+        }
+    ]
+}
+)";
+
+TEST_CASE_FIXTURE(Fixture, "directory_move_with_instance_renames_updates_moved_and_unmoved_consumers")
+{
+    setApplyEditCapability(this);
+    loadSourcemap(SOURCEMAP_HOOKS_BEFORE);
+
+    std::string systemSource = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHooks)
+)";
+    std::string deathSource = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHooks)
+)";
+    newDocument("src/EventHooks/PlayersHooks/API.luau", "return {}");
+    auto movedConsumerOldUri = newDocument("src/EventHooks/PlayersHooks/System.luau", systemSource);
+    auto deathUri = newDocument("src/Death/System.luau", deathSource);
+
+    auto oldUri = workspace.rootUri.resolvePath("src/EventHooks/PlayersHooks");
+    auto newUri = workspace.rootUri.resolvePath("src/EventHooks/PlayerssHooks");
+    workspace.onDidRenameFiles({{oldUri.toString(), newUri.toString()}});
+
+    // Deferred: the sourcemap does not yet contain the new locations
+    CHECK_EQ(countRequests(this, "window/showMessageRequest"), 0);
+
+    // Rojo regenerated with the renamed instances (project file was updated by the user)
+    loadSourcemap(SOURCEMAP_HOOKS_AFTER);
+    REQUIRE_EQ(countRequests(this, "window/showMessageRequest"), 1);
+
+    client->respondToLastRequest(json{{"title", "Update requires"}});
+    REQUIRE_EQ(client->requestQueue.back().first, "workspace/applyEdit");
+    lsp::ApplyWorkspaceEditParams editParams = client->requestQueue.back().second.value();
+
+    // The unmoved consumer is updated in place
+    CHECK_EQ(applyEdit(deathSource, editParams.edit.changes.at(deathUri)), R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
+)");
+
+    // The moved consumer's edit must target its NEW uri (the old file no longer exists)
+    auto movedConsumerNewUri = workspace.rootUri.resolvePath("src/EventHooks/PlayerssHooks/System.luau");
+    CHECK_EQ(editParams.edit.changes.count(movedConsumerOldUri), 0);
+    REQUIRE_EQ(editParams.edit.changes.count(movedConsumerNewUri), 1);
+    CHECK_EQ(applyEdit(systemSource, editParams.edit.changes.at(movedConsumerNewUri)), R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
+)");
+}
+
 TEST_SUITE_END();
