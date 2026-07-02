@@ -755,6 +755,12 @@
           "default": "prompt",
           "scope": "resource"
         },
+        "luau-lsp.fileOperations.renameVariablesOnRequireUpdate": {
+          "markdownDescription": "When a require update changes the required module's name, also rename local variables that were named after the module (including their usages and type prefixes)",
+          "type": "boolean",
+          "default": true,
+          "scope": "resource"
+        },
         "luau-lsp.completion.enableFragmentAutocomplete": {
           "markdownDescription": "Enables the fragment autocomplete system for performance improvements",
           "type": "boolean",

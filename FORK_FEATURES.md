@@ -144,7 +144,8 @@ apply them, similar to TypeScript's "update imports on file move".
 
 ```jsonc
 {
-    "luau-lsp.fileOperations.updateRequiresOnMove": "prompt" // "prompt" | "always" | "never"
+    "luau-lsp.fileOperations.updateRequiresOnMove": "prompt", // "prompt" | "always" | "never"
+    "luau-lsp.fileOperations.renameVariablesOnRequireUpdate": true
 }
 ```
 
@@ -152,8 +153,13 @@ apply them, similar to TypeScript's "update imports on file move".
 
 - Style is preserved per require: service-based (`ReplicatedStorage.Utils.M`), `script`-relative,
   `game:GetService("X").Y`, string-relative (`./x`, `../x`, `@self/x`) and string-aliased
-  (`@alias/x`) requires are each rewritten in their own style. Alias local variable names are
-  never touched (renaming the variable remains a separate symbol rename).
+  (`@alias/x`) requires are each rewritten in their own style.
+- When the rewrite changes the required module's **name** (its final path component) and the
+  local variable was named after the module (`local Module = require(...Module)`), the variable
+  and all its usages (including type prefixes like `Module.Type`) are renamed to the new module
+  name in the same edit. Custom variable names are left alone, and the rename is skipped (with a
+  log message) when the new name is already in use in the file or the old name is bound more
+  than once. Disable via `luau-lsp.fileOperations.renameVariablesOnRequireUpdate`.
 - Cross-service moves add the missing `game:GetService(...)` declaration (honouring section
   configuration).
 - Only requires whose **resolved target** matches the move are changed; comments, unrelated

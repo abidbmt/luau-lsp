@@ -8,6 +8,7 @@
 #include "LSP/Utils.hpp"
 #include "LSP/Workspace.hpp"
 #include "LuauFileUtils.hpp"
+#include "Luau/Parser.h"
 #include "Luau/RequireTracer.h"
 #include "Luau/StringUtils.h"
 #include "Platform/ImportSections.hpp"
@@ -82,6 +83,163 @@ struct FindRequireCallsVisitor : public Luau::AstVisitor
     }
 };
 
+// Keep in sync with the parser's reserved words (`const` is contextual and deliberately absent)
+static bool isReservedKeyword(std::string_view name)
+{
+    static const std::string_view keywords[] = {"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local",
+        "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"};
+    return std::find(std::begin(keywords), std::end(keywords), name) != std::end(keywords);
+}
+
+/// The name a module gets from a string require path: the last component minus its extension,
+/// with trailing init files resolving to their directory's name
+static std::optional<std::string> stringRequireLeafName(std::string path)
+{
+    for (std::string_view extension : {".luau", ".lua"})
+        if (path.size() > extension.size() && path.compare(path.size() - extension.size(), extension.size(), extension) == 0)
+        {
+            path.resize(path.size() - extension.size());
+            break;
+        }
+
+    auto lastComponent = [](const std::string& p)
+    {
+        auto pos = p.find_last_of('/');
+        return pos == std::string::npos ? p : p.substr(pos + 1);
+    };
+
+    auto leaf = lastComponent(path);
+    if (leaf == "init")
+    {
+        auto pos = path.find_last_of('/');
+        if (pos == std::string::npos)
+            return std::nullopt;
+        leaf = lastComponent(path.substr(0, pos));
+    }
+    if (leaf.empty())
+        return std::nullopt;
+    return leaf;
+}
+
+/// The name of the instance a require argument currently refers to (the final chain component)
+static std::optional<std::string> requireArgumentLeafName(Luau::AstExpr* argument)
+{
+    if (auto* indexName = argument->as<Luau::AstExprIndexName>())
+        return std::string(indexName->index.value);
+    if (auto* indexExpr = argument->as<Luau::AstExprIndexExpr>())
+        if (auto* str = indexExpr->index->as<Luau::AstExprConstantString>())
+            return std::string(str->value.data, str->value.size);
+    return std::nullopt;
+}
+
+/// The name a module gets from a rewritten instance require path (the final dot component;
+/// bracketed or call components produce non-identifiers that the caller rejects)
+static std::string instanceRequireLeafName(const std::string& scriptPath)
+{
+    auto pos = scriptPath.find_last_of('.');
+    return pos == std::string::npos ? scriptPath : scriptPath.substr(pos + 1);
+}
+
+/// Finds the local a require call's result is directly bound to (`local X = require(...)`,
+/// looking through parentheses and type assertions)
+struct FindRequireBindingVisitor : public Luau::AstVisitor
+{
+    Luau::AstExpr* requireArgument;
+    Luau::AstLocal* binding = nullptr;
+
+    explicit FindRequireBindingVisitor(Luau::AstExpr* requireArgument)
+        : requireArgument(requireArgument)
+    {
+    }
+
+    bool visit(Luau::AstStatLocal* stat) override
+    {
+        for (size_t i = 0; i < stat->values.size && i < stat->vars.size; ++i)
+        {
+            auto* value = stat->values.data[i];
+            while (true)
+            {
+                if (auto* assertion = value->as<Luau::AstExprTypeAssertion>())
+                    value = assertion->expr;
+                else if (auto* group = value->as<Luau::AstExprGroup>())
+                    value = group->expr;
+                else
+                    break;
+            }
+            if (auto* call = value->as<Luau::AstExprCall>(); call && call->args.size == 1 && call->args.data[0] == requireArgument)
+                binding = stat->vars.data[i];
+        }
+        return true;
+    }
+};
+
+/// Surveys binding names before renaming `oldName` to `newName`: more than one binding named
+/// `oldName` makes type-prefix references ambiguous, and an existing `newName` would be
+/// captured by (or capture) the renamed variable
+struct VariableNameSurvey : public Luau::AstVisitor
+{
+    std::string_view oldName;
+    std::string_view newName;
+    size_t oldNameBindings = 0;
+    bool newNameInUse = false;
+
+    VariableNameSurvey(std::string_view oldName, std::string_view newName)
+        : oldName(oldName)
+        , newName(newName)
+    {
+    }
+
+    void checkBinding(Luau::AstLocal* local)
+    {
+        if (local->name.value == oldName)
+            oldNameBindings++;
+        if (local->name.value == newName)
+            newNameInUse = true;
+    }
+
+    bool visit(Luau::AstStatLocal* stat) override
+    {
+        for (auto* var : stat->vars)
+            checkBinding(var);
+        return true;
+    }
+
+    bool visit(Luau::AstStatLocalFunction* stat) override
+    {
+        checkBinding(stat->name);
+        return true;
+    }
+
+    bool visit(Luau::AstExprFunction* function) override
+    {
+        for (auto* arg : function->args)
+            checkBinding(arg);
+        if (function->self)
+            checkBinding(function->self);
+        return true;
+    }
+
+    bool visit(Luau::AstStatFor* stat) override
+    {
+        checkBinding(stat->var);
+        return true;
+    }
+
+    bool visit(Luau::AstStatForIn* stat) override
+    {
+        for (auto* var : stat->vars)
+            checkBinding(var);
+        return true;
+    }
+
+    bool visit(Luau::AstExprGlobal* global) override
+    {
+        if (global->name.value == newName)
+            newNameInUse = true;
+        return true;
+    }
+};
+
 enum struct InstanceChainRoot
 {
     Script,
@@ -126,6 +284,29 @@ static std::optional<InstanceChainRoot> analyzeInstanceChain(Luau::AstExpr* expr
     return std::nullopt;
 }
 
+/// Parses document text into a standalone source module (mirrors the private
+/// Luau::Frontend::parse). The frontend's stored ASTs are deliberately not used: a physical
+/// file can be indexed under several module names (stale names are never evicted) and some of
+/// their ASTs predate the current content - ranges computed from those would corrupt the
+/// document on edit
+static std::optional<Luau::SourceModule> parseCurrentText(
+    WorkspaceFolder& workspace, const Luau::ModuleName& moduleName, const std::string& text)
+{
+    Luau::SourceModule sourceModule;
+    auto parseOptions = workspace.fileResolver.getConfig(moduleName, workspace.limits).parseOptions;
+    parseOptions.captureComments = true;
+
+    auto parseResult = Luau::Parser::parse(text.data(), text.size(), *sourceModule.names, *sourceModule.allocator, parseOptions);
+    if (!parseResult.root)
+        return std::nullopt;
+
+    sourceModule.name = moduleName;
+    sourceModule.root = parseResult.root;
+    sourceModule.hotcomments = std::move(parseResult.hotcomments);
+    sourceModule.commentLocations = std::move(parseResult.commentLocations);
+    return sourceModule;
+}
+
 RenameOperation captureRenameOperation(WorkspaceFolder& workspace, const Uri& oldUri, const Uri& newUri)
 {
     RenameOperation operation{oldUri, newUri};
@@ -147,6 +328,13 @@ RenameOperation captureRenameOperation(WorkspaceFolder& workspace, const Uri& ol
 
 namespace
 {
+struct PendingVariableRename
+{
+    Luau::AstExpr* argument;
+    std::string oldName;
+    std::string newName;
+};
+
 struct ModuleUpdateContext
 {
     WorkspaceFolder& workspace;
@@ -165,6 +353,11 @@ struct ModuleUpdateContext
     // Lazily computed state for adding missing service imports
     std::optional<AutoImports::RobloxFindImportsVisitor> importsVisitor = std::nullopt;
     std::unordered_set<std::string> addedServices{};
+
+    // Variables named after a module whose name changed, renamed after all requires are rewritten
+    bool renameVariables = false;
+    std::vector<PendingVariableRename> pendingVariableRenames{};
+    std::vector<Luau::Location> rewrittenArgumentLocations{};
 };
 } // namespace
 
@@ -317,6 +510,51 @@ static std::optional<std::string> computeNewInstanceRequire(
     return convertToScriptPath(optimised);
 }
 
+/// Renames local variables that were named after a module whose require path rewrite changed
+/// the module's name, keeping the variable and the module in sync (e.g. `local Module =
+/// require(...Module)` follows a rename of Module). Custom variable names are left alone
+static void renamePendingVariables(ModuleUpdateContext& ctx)
+{
+    std::unordered_set<std::string> introducedNames{};
+    for (const auto& pending : ctx.pendingVariableRenames)
+    {
+        FindRequireBindingVisitor bindingVisitor{pending.argument};
+        ctx.sourceModule->root->visit(&bindingVisitor);
+        if (!bindingVisitor.binding || bindingVisitor.binding->name.value != pending.oldName)
+            continue;
+
+        VariableNameSurvey survey{pending.oldName, pending.newName};
+        ctx.sourceModule->root->visit(&survey);
+        if (survey.oldNameBindings > 1)
+        {
+            recordSkipped(ctx, pending.argument, "variable '" + pending.oldName + "' not renamed: multiple bindings share this name");
+            continue;
+        }
+        if (survey.newNameInUse || introducedNames.count(pending.newName) != 0)
+        {
+            recordSkipped(ctx, pending.argument, "variable '" + pending.oldName + "' not renamed: '" + pending.newName + "' is already in use");
+            continue;
+        }
+
+        for (const auto& location : findSymbolReferences(*ctx.sourceModule, Luau::Symbol(bindingVisitor.binding)))
+        {
+            // References inside a rewritten require argument are already covered by the new
+            // path text and must not produce overlapping edits
+            bool insideRewrite = std::any_of(ctx.rewrittenArgumentLocations.begin(), ctx.rewrittenArgumentLocations.end(),
+                [&location](const Luau::Location& argumentLocation)
+                {
+                    return argumentLocation.contains(location.begin);
+                });
+            if (insideRewrite)
+                continue;
+            auto range = lsp::Range{ctx.textDocument->convertPosition(location.begin), ctx.textDocument->convertPosition(location.end)};
+            ctx.result.edit.changes[ctx.fromUriNew].push_back(lsp::TextEdit{range, pending.newName});
+        }
+        ctx.result.renamedVariableCount++;
+        introducedNames.insert(pending.newName);
+    }
+}
+
 static void processModule(ModuleUpdateContext& ctx, const std::optional<std::vector<Uri>>& limitToFiles)
 {
     if (limitToFiles)
@@ -413,7 +651,28 @@ static void processModule(ModuleUpdateContext& ctx, const std::optional<std::vec
 
         ctx.result.edit.changes[ctx.fromUriNew].push_back(lsp::TextEdit{range, *newText});
         ctx.result.updatedRequireCount++;
+        ctx.rewrittenArgumentLocations.push_back(argument->location);
+
+        if (ctx.renameVariables)
+        {
+            std::optional<std::string> oldName;
+            std::optional<std::string> newName;
+            if (stringContents)
+            {
+                oldName = stringRequireLeafName(*stringContents);
+                newName = stringRequireLeafName(newText->substr(1, newText->size() - 2));
+            }
+            else
+            {
+                oldName = requireArgumentLeafName(argument);
+                newName = instanceRequireLeafName(*newText);
+            }
+            if (oldName && newName && *oldName != *newName && Luau::isIdentifier(*newName) && !isReservedKeyword(*newName))
+                ctx.pendingVariableRenames.push_back({argument, std::move(*oldName), std::move(*newName)});
+        }
     }
+
+    renamePendingVariables(ctx);
 }
 
 RequireUpdateResult computeRequireUpdates(
@@ -422,6 +681,7 @@ RequireUpdateResult computeRequireUpdates(
     RequireUpdateResult result{};
 
     auto* robloxPlatform = dynamic_cast<RobloxPlatform*>(workspace.platform.get());
+    bool renameVariables = workspace.client->getConfiguration(workspace.rootUri).fileOperations.renameVariablesOnRequireUpdate;
 
     std::unordered_map<std::string, Uri> movedVirtualPaths{};
     for (const auto& moved : operation.movedInstanceModules)
@@ -434,14 +694,21 @@ RequireUpdateResult computeRequireUpdates(
     // A stale source node can linger under a module name that resolves to the same physical
     // file as a genuinely moved module (e.g. renaming A -> B and later back to A: the
     // pre-rename node for A is never evicted). Process moved modules first so the
-    // physical-file dedup below cannot let a stale twin starve them of their own updates
-    std::stable_partition(moduleNames.begin(), moduleNames.end(),
-        [&](const Luau::ModuleName& name)
+    // physical-file dedup below cannot let a stale twin starve them of their own updates;
+    // among moved modules, prefer captured virtual paths (they resolve relative requires)
+    auto moduleRank = [&](const Luau::ModuleName& name)
+    {
+        if (movedVirtualPaths.count(name) != 0)
+            return 0;
+        auto uri = workspace.fileResolver.getUri(name);
+        if (uri.scheme == "file" && mapMovedUri(uri, operation).has_value())
+            return 1;
+        return 2;
+    };
+    std::stable_sort(moduleNames.begin(), moduleNames.end(),
+        [&](const Luau::ModuleName& a, const Luau::ModuleName& b)
         {
-            if (movedVirtualPaths.count(name) != 0)
-                return true;
-            auto uri = workspace.fileResolver.getUri(name);
-            return uri.scheme == "file" && mapMovedUri(uri, operation).has_value();
+            return moduleRank(a) < moduleRank(b);
         });
 
     // A moved file can be indexed under both its stale (pre-move) and new module name -
@@ -461,10 +728,6 @@ RequireUpdateResult computeRequireUpdates(
                     fromUriOld = moved.oldRealUri;
 
         if (fromUriOld.scheme != "file")
-            continue;
-
-        auto* sourceModule = workspace.frontend.getSourceModule(moduleName);
-        if (!sourceModule || !sourceModule->root)
             continue;
 
         auto fromUriNew = mapMovedUri(fromUriOld, operation).value_or(fromUriOld);
@@ -487,6 +750,13 @@ RequireUpdateResult computeRequireUpdates(
             textDocument = &*temporaryDocument;
         }
 
+        auto text = textDocument->getText();
+        if (text.find("require") == std::string::npos)
+            continue;
+        auto sourceModule = parseCurrentText(workspace, moduleName, text);
+        if (!sourceModule)
+            continue;
+
         ModuleUpdateContext ctx{
             workspace,
             robloxPlatform,
@@ -497,9 +767,10 @@ RequireUpdateResult computeRequireUpdates(
             fromUriOld,
             fromUriNew,
             fromUriNew != fromUriOld,
-            sourceModule,
+            &*sourceModule,
             textDocument,
         };
+        ctx.renameVariables = renameVariables;
         processModule(ctx, limitToFiles);
     }
 
@@ -555,7 +826,7 @@ void WorkspaceFolder::applyOrPromptRequireUpdates(RequireUpdates::RenameOperatio
     }
 
     for (const auto& skipped : result.skipped)
-        client->sendLogMessage(lsp::MessageType::Warning, "Require not updated: " + skipped);
+        client->sendLogMessage(lsp::MessageType::Warning, "Skipped during require update: " + skipped);
 
     if (result.updatedRequireCount == 0)
         return;
@@ -577,8 +848,9 @@ void WorkspaceFolder::applyOrPromptRequireUpdates(RequireUpdates::RenameOperatio
         return;
     }
 
-    auto message = "Update " + std::to_string(result.updatedRequireCount) + " require(s) in " + std::to_string(result.edit.changes.size()) +
-                   " file(s) for '" + operation.newUri.filename() + "'?";
+    auto renames = result.renamedVariableCount != 0 ? " and " + std::to_string(result.renamedVariableCount) + " variable name(s)" : "";
+    auto message = "Update " + std::to_string(result.updatedRequireCount) + " require(s)" + renames + " in " +
+                   std::to_string(result.edit.changes.size()) + " file(s) for '" + operation.newUri.filename() + "'?";
     std::vector<lsp::MessageActionItem> actions{{"Update requires"}, {"Skip"}, {"Always update"}, {"Never update"}};
     client->showMessageRequest(lsp::MessageType::Info, message, actions,
         [this, edit = std::move(result.edit)](const json_rpc::JsonRpcMessage& response)

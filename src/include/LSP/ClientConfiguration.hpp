@@ -302,8 +302,11 @@ struct ClientFileOperationsConfiguration
 {
     /// How require statements referencing a moved or renamed file should be updated
     RequireUpdateMode updateRequiresOnMove = RequireUpdateMode::Prompt;
+    /// When a require update changes the required module's name, also rename local variables
+    /// that were named after the module (including their usages and type prefixes)
+    bool renameVariablesOnRequireUpdate = true;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFileOperationsConfiguration, updateRequiresOnMove);
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ClientFileOperationsConfiguration, updateRequiresOnMove, renameVariablesOnRequireUpdate);
 
 struct ClientFFlagsConfiguration
 {

@@ -446,7 +446,8 @@ TEST_CASE_FIXTURE(Fixture, "aliased_string_requires_keep_alias_when_possible")
     auto result = RequireUpdates::computeRequireUpdates(workspace, operation);
 
     REQUIRE_EQ(result.updatedRequireCount, 1);
-    CHECK_EQ(applyEdit(source, result.edit.changes.at(mainUri)), "local getPlayerId = require(\"@utils/getPlayerIdentifier\")\n");
+    CHECK_EQ(result.renamedVariableCount, 1);
+    CHECK_EQ(applyEdit(source, result.edit.changes.at(mainUri)), "local getPlayerIdentifier = require(\"@utils/getPlayerIdentifier\")\n");
 }
 
 TEST_CASE_FIXTURE(Fixture, "different_importing_files_get_different_paths")
@@ -783,10 +784,10 @@ local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHo
     REQUIRE_EQ(client->requestQueue.back().first, "workspace/applyEdit");
     lsp::ApplyWorkspaceEditParams editParams = client->requestQueue.back().second.value();
 
-    // The unmoved consumer is updated in place
+    // The unmoved consumer is updated in place (the module-named variable follows the rename)
     CHECK_EQ(applyEdit(deathSource, editParams.edit.changes.at(deathUri)), R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
+local PlayerssHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
 )");
 
     // The moved consumer's edit must target its NEW uri (the old file no longer exists)
@@ -795,7 +796,7 @@ local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.Playerss
     REQUIRE_EQ(editParams.edit.changes.count(movedConsumerNewUri), 1);
     CHECK_EQ(applyEdit(systemSource, editParams.edit.changes.at(movedConsumerNewUri)), R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
+local PlayerssHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
 )");
 }
 
@@ -812,8 +813,8 @@ TEST_CASE_FIXTURE(Fixture, "renaming_directory_back_still_updates_moved_consumer
 
 local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHooks)
 )";
-    newDocument("src/EventHooks/PlayersHooks/API.luau", "return {}");
-    newDocument("src/EventHooks/PlayersHooks/System.luau", systemSource);
+    auto apiOldUri = newDocument("src/EventHooks/PlayersHooks/API.luau", "return {}");
+    auto systemOldUri = newDocument("src/EventHooks/PlayersHooks/System.luau", systemSource);
     auto deathUri = newDocument("src/Death/System.luau", systemSource);
 
     auto oldUri = workspace.rootUri.resolvePath("src/EventHooks/PlayersHooks");
@@ -827,11 +828,14 @@ local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHo
     REQUIRE_EQ(client->requestQueue.back().first, "workspace/applyEdit");
 
     // Simulate the client applying the edit: files now live at the new locations with
-    // rewritten requires, and the unmoved consumer's buffer was updated in place
+    // rewritten requires (editor tabs follow the rename, closing the old paths), and the
+    // unmoved consumer's buffer was updated in place
     std::string renamedSystemSource = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
 )";
+    workspace.closeTextDocument(apiOldUri);
+    workspace.closeTextDocument(systemOldUri);
     newDocument("src/EventHooks/PlayerssHooks/API.luau", "return {}");
     newDocument("src/EventHooks/PlayerssHooks/System.luau", renamedSystemSource);
     updateDocument(deathUri, renamedSystemSource);
@@ -854,6 +858,135 @@ local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.Playerss
     auto restoredSystemUri = workspace.rootUri.resolvePath("src/EventHooks/PlayersHooks/System.luau");
     REQUIRE_EQ(editParams.edit.changes.count(restoredSystemUri), 1);
     CHECK_EQ(applyEdit(renamedSystemSource, editParams.edit.changes.at(restoredSystemUri)), systemSource);
+}
+
+// ===== variable renames alongside require updates =====
+
+TEST_CASE_FIXTURE(Fixture, "bound_variable_renamed_when_module_renamed")
+{
+    switchToStandardPlatform();
+    std::string source = R"(local getPlayerId = require("./utils/getPlayerId")
+local id: getPlayerId.Id = getPlayerId()
+return id
+)";
+    auto mainUri = newDocument("main.luau", source);
+    auto oldUri = newDocument("utils/getPlayerId.luau", "return {}");
+    auto newUri = workspace.rootUri.resolvePath("utils/getPlayerIdentifier.luau");
+
+    auto operation = RequireUpdates::captureRenameOperation(workspace, oldUri, newUri);
+    auto result = RequireUpdates::computeRequireUpdates(workspace, operation);
+
+    REQUIRE_EQ(result.updatedRequireCount, 1);
+    CHECK_EQ(result.renamedVariableCount, 1);
+    CHECK(result.skipped.empty());
+    CHECK_EQ(applyEdit(source, result.edit.changes.at(mainUri)), R"(local getPlayerIdentifier = require("./utils/getPlayerIdentifier")
+local id: getPlayerIdentifier.Id = getPlayerIdentifier()
+return id
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "custom_variable_names_not_renamed")
+{
+    switchToStandardPlatform();
+    std::string source = R"(local playerId = require("./utils/getPlayerId")
+return playerId()
+)";
+    auto mainUri = newDocument("main.luau", source);
+    auto oldUri = newDocument("utils/getPlayerId.luau", "return {}");
+    auto newUri = workspace.rootUri.resolvePath("utils/getPlayerIdentifier.luau");
+
+    auto operation = RequireUpdates::captureRenameOperation(workspace, oldUri, newUri);
+    auto result = RequireUpdates::computeRequireUpdates(workspace, operation);
+
+    REQUIRE_EQ(result.updatedRequireCount, 1);
+    CHECK_EQ(result.renamedVariableCount, 0);
+    CHECK(result.skipped.empty());
+    CHECK_EQ(applyEdit(source, result.edit.changes.at(mainUri)), R"(local playerId = require("./utils/getPlayerIdentifier")
+return playerId()
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "variable_rename_skipped_when_new_name_in_use")
+{
+    switchToStandardPlatform();
+    std::string source = R"(local getPlayerIdentifier = 5
+local getPlayerId = require("./utils/getPlayerId")
+return getPlayerId() + getPlayerIdentifier
+)";
+    auto mainUri = newDocument("main.luau", source);
+    auto oldUri = newDocument("utils/getPlayerId.luau", "return {}");
+    auto newUri = workspace.rootUri.resolvePath("utils/getPlayerIdentifier.luau");
+
+    auto operation = RequireUpdates::captureRenameOperation(workspace, oldUri, newUri);
+    auto result = RequireUpdates::computeRequireUpdates(workspace, operation);
+
+    REQUIRE_EQ(result.updatedRequireCount, 1);
+    CHECK_EQ(result.renamedVariableCount, 0);
+    REQUIRE_EQ(result.skipped.size(), 1);
+    CHECK(result.skipped[0].find("already in use") != std::string::npos);
+    CHECK_EQ(applyEdit(source, result.edit.changes.at(mainUri)), R"(local getPlayerIdentifier = 5
+local getPlayerId = require("./utils/getPlayerIdentifier")
+return getPlayerId() + getPlayerIdentifier
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "variable_rename_disabled_by_configuration")
+{
+    switchToStandardPlatform();
+    client->globalConfig.fileOperations.renameVariablesOnRequireUpdate = false;
+    std::string source = R"(local getPlayerId = require("./utils/getPlayerId")
+return getPlayerId()
+)";
+    auto mainUri = newDocument("main.luau", source);
+    auto oldUri = newDocument("utils/getPlayerId.luau", "return {}");
+    auto newUri = workspace.rootUri.resolvePath("utils/getPlayerIdentifier.luau");
+
+    auto operation = RequireUpdates::captureRenameOperation(workspace, oldUri, newUri);
+    auto result = RequireUpdates::computeRequireUpdates(workspace, operation);
+
+    REQUIRE_EQ(result.updatedRequireCount, 1);
+    CHECK_EQ(result.renamedVariableCount, 0);
+    CHECK_EQ(applyEdit(source, result.edit.changes.at(mainUri)), R"(local getPlayerId = require("./utils/getPlayerIdentifier")
+return getPlayerId()
+)");
+}
+
+TEST_CASE_FIXTURE(Fixture, "instance_require_variable_renamed_when_folder_renamed")
+{
+    loadSourcemap(SOURCEMAP_HOOKS_BEFORE);
+
+    std::string consumerSource = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayersHooks = require(ReplicatedStorage.EventHooks.PlayersHooks.PlayersHooks)
+
+local hook: PlayersHooks.Hook = PlayersHooks.PlayerJoined
+return hook
+)";
+    newDocument("src/EventHooks/PlayersHooks/API.luau", "return {}");
+    newDocument("src/EventHooks/PlayersHooks/System.luau", consumerSource);
+    auto deathUri = newDocument("src/Death/System.luau", consumerSource);
+
+    auto oldUri = workspace.rootUri.resolvePath("src/EventHooks/PlayersHooks");
+    auto newUri = workspace.rootUri.resolvePath("src/EventHooks/PlayerssHooks");
+    auto operation = RequireUpdates::captureRenameOperation(workspace, oldUri, newUri);
+    loadSourcemap(SOURCEMAP_HOOKS_AFTER);
+    auto result = RequireUpdates::computeRequireUpdates(workspace, operation);
+
+    std::string expected = R"(local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlayerssHooks = require(ReplicatedStorage.EventHooks.PlayerssHooks.PlayerssHooks)
+
+local hook: PlayerssHooks.Hook = PlayerssHooks.PlayerJoined
+return hook
+)";
+    REQUIRE_EQ(result.updatedRequireCount, 2);
+    CHECK_EQ(result.renamedVariableCount, 2);
+    CHECK_EQ(applyEdit(consumerSource, result.edit.changes.at(deathUri)), expected);
+
+    // The moved consumer's variable is renamed too, targeting its new uri
+    auto movedConsumerNewUri = workspace.rootUri.resolvePath("src/EventHooks/PlayerssHooks/System.luau");
+    REQUIRE_EQ(result.edit.changes.count(movedConsumerNewUri), 1);
+    CHECK_EQ(applyEdit(consumerSource, result.edit.changes.at(movedConsumerNewUri)), expected);
 }
 
 // Regression scaffold for a new-solver use-after-free: after a sourcemap change moves a module,

@@ -37,6 +37,8 @@ struct RequireUpdateResult
 {
     lsp::WorkspaceEdit edit{};
     size_t updatedRequireCount = 0;
+    /// Local variables renamed because they were named after a module whose name changed
+    size_t renamedVariableCount = 0;
     /// Human-readable descriptions of requires that resolve to the moved module but could not
     /// be safely rewritten
     std::vector<std::string> skipped{};
