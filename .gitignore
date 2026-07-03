@@ -1,4 +1,6 @@
 /build
+/build-asan
+/asan-reports
 .vscode/settings.json
 /.vs
 out/
