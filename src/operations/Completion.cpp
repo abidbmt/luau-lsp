@@ -422,6 +422,88 @@ static bool isIdentifier(std::string_view s)
     return Luau::isIdentifier(s) && !isKeyword(s);
 }
 
+/// After `return` with an empty or single partially-typed expression, the enclosing blocks'
+/// closing keywords are valid and commonly intended (e.g. `if x then return end`), but Luau's
+/// autocomplete routes this position to expression completion, which never suggests them.
+/// Merges the closers that would be syntactically valid in place of the typed expression.
+/// The ancestry is recomputed from the full source module: fragment autocomplete's result
+/// ancestry is rooted at the re-parsed fragment and may not contain the enclosing blocks
+static void addReturnBlockCloserKeywords(Luau::AutocompleteResult& result, const Luau::SourceModule& sourceModule, Luau::Position position)
+{
+    auto ancestry = Luau::findAncestryAtPositionForAutocomplete(sourceModule, position);
+    if (ancestry.empty())
+        return;
+
+    Luau::AstNode* node = ancestry.back();
+    Luau::AstStatReturn* statReturn = nullptr;
+    size_t returnIndex = 0;
+
+    if (auto* ret = node->as<Luau::AstStatReturn>(); ret && ret->list.size == 0)
+    {
+        statReturn = ret;
+        returnIndex = ancestry.size() - 1;
+    }
+    else if (ancestry.size() >= 2 && (node->is<Luau::AstExprGlobal>() || node->is<Luau::AstExprLocal>() || node->is<Luau::AstExprError>()))
+    {
+        // Only the sole expression of the return may be replaced by a closing keyword
+        // (`return 1, en` cannot become `return 1, end`)
+        if (auto* ret = ancestry[ancestry.size() - 2]->as<Luau::AstStatReturn>(); ret && ret->list.size == 1 && ret->list.data[0] == node)
+        {
+            statReturn = ret;
+            returnIndex = ancestry.size() - 2;
+        }
+    }
+    if (!statReturn || returnIndex < 1)
+        return;
+
+    auto addKeyword = [&result](const char* name)
+    {
+        result.entryMap.emplace(name, Luau::AutocompleteEntry{Luau::AutocompleteEntryKind::Keyword});
+    };
+
+    // "end" for any unclosed enclosing block (mirrors Luau's autocompleteStatement)
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+    {
+        if (auto* statForIn = (*it)->as<Luau::AstStatForIn>(); statForIn && !statForIn->body->hasEnd)
+            addKeyword("end");
+        else if (auto* statFor = (*it)->as<Luau::AstStatFor>(); statFor && !statFor->body->hasEnd)
+            addKeyword("end");
+        else if (auto* statIf = (*it)->as<Luau::AstStatIf>())
+        {
+            bool hasEnd = statIf->thenbody->hasEnd;
+            if (statIf->elsebody)
+            {
+                if (auto* elseBlock = statIf->elsebody->as<Luau::AstStatBlock>())
+                    hasEnd = elseBlock->hasEnd;
+            }
+            if (!hasEnd)
+                addKeyword("end");
+        }
+        else if (auto* statWhile = (*it)->as<Luau::AstStatWhile>(); statWhile && !statWhile->body->hasEnd)
+            addKeyword("end");
+        else if (auto* exprFunction = (*it)->as<Luau::AstExprFunction>(); exprFunction && !exprFunction->body->hasEnd)
+            addKeyword("end");
+        if (auto* block = (*it)->as<Luau::AstStatBlock>(); block && !block->hasEnd)
+            addKeyword("end");
+    }
+
+    // "else"/"elseif" when returning from the then-branch of an if without an else,
+    // "until" when returning from an unclosed repeat body
+    if (returnIndex >= 2)
+    {
+        if (auto* block = ancestry[returnIndex - 1]->as<Luau::AstStatBlock>())
+        {
+            if (auto* statIf = ancestry[returnIndex - 2]->as<Luau::AstStatIf>(); statIf && statIf->thenbody == block && !statIf->elsebody)
+            {
+                addKeyword("else");
+                addKeyword("elseif");
+            }
+            if (auto* statRepeat = ancestry[returnIndex - 2]->as<Luau::AstStatRepeat>(); statRepeat && statRepeat->body == block && !block->hasEnd)
+                addKeyword("until");
+        }
+    }
+}
+
 static bool canSuggestType(Luau::TypeId ty)
 {
     ty = Luau::follow(ty);
@@ -787,6 +869,10 @@ std::vector<lsp::CompletionItem> WorkspaceFolder::completion(const lsp::Completi
 
         result = Luau::autocomplete(frontend, moduleName, position, stringCompletionCB);
     }
+
+    // Both paths leave a freshly parsed source module behind (frontend.parse / checkStrict)
+    if (const auto* sourceModule = frontend.getSourceModule(moduleName))
+        addReturnBlockCloserKeywords(result, *sourceModule, position);
 
     std::vector<lsp::CompletionItem> items{};
 

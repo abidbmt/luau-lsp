@@ -87,6 +87,91 @@ TEST_CASE_FIXTURE(Fixture, "function_autocomplete_has_documentation")
     CHECK_EQ(item.documentation->value, "This is a function documentation comment");
 }
 
+static std::vector<lsp::CompletionItem> completeAt(Fixture* fixture, const std::string& sourceWithCursor)
+{
+    auto [source, marker] = sourceWithMarker(sourceWithCursor);
+    auto uri = fixture->newDocument("closers.luau", source);
+    lsp::CompletionParams params;
+    params.textDocument = lsp::TextDocumentIdentifier{uri};
+    params.position = marker;
+    return fixture->workspace.completion(params, nullptr);
+}
+
+TEST_CASE_FIXTURE(Fixture, "end_offered_after_return_in_unclosed_if")
+{
+    auto result = completeAt(this, "if true then return en|");
+    auto item = requireItem(result, "end");
+    CHECK_EQ(item.kind, lsp::CompletionItemKind::Keyword);
+    CHECK_EQ(item.sortText, std::string(SortText::PrioritisedSuggestion));
+    CHECK(getItem(result, "else"));
+    CHECK(getItem(result, "elseif"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "end_offered_after_bare_return_in_unclosed_function")
+{
+    auto result = completeAt(this, "local function f()\n\treturn en|");
+    auto item = requireItem(result, "end");
+    CHECK_EQ(item.sortText, std::string(SortText::PrioritisedSuggestion));
+}
+
+TEST_CASE_FIXTURE(Fixture, "end_not_offered_after_return_with_preceding_values")
+{
+    auto result = completeAt(this, "local function f()\n\treturn 1, en|");
+    CHECK_FALSE(getItem(result, "end"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "end_not_offered_after_return_when_blocks_closed")
+{
+    auto result = completeAt(this, "local function f()\n\treturn en|\nend");
+    CHECK_FALSE(getItem(result, "end"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "end_not_offered_after_return_at_top_level")
+{
+    auto result = completeAt(this, "return en|");
+    CHECK_FALSE(getItem(result, "end"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "end_not_offered_inside_nested_return_expression")
+{
+    auto result = completeAt(this, "local function f()\n\treturn not en|");
+    CHECK_FALSE(getItem(result, "end"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "else_offered_after_return_in_closed_if")
+{
+    // The if already has its end, so `end` must not be offered - but `else` is still valid
+    auto result = completeAt(this, "if true then return el|\nend");
+    CHECK(getItem(result, "else"));
+    CHECK(getItem(result, "elseif"));
+    CHECK_FALSE(getItem(result, "end"));
+}
+
+TEST_CASE_FIXTURE(Fixture, "until_offered_after_return_in_repeat")
+{
+    auto result = completeAt(this, "repeat return un|");
+    auto item = requireItem(result, "until");
+    CHECK_EQ(item.sortText, std::string(SortText::PrioritisedSuggestion));
+}
+
+TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "end_offered_after_return_via_fragment_autocomplete")
+{
+    auto results = fragmentAutocomplete("print(1)\n", "print(1)\nif true then return en\n", lsp::Position{1, 22});
+    auto item = requireItem(results, "end");
+    CHECK_EQ(item.sortText, std::string(SortText::PrioritisedSuggestion));
+}
+
+TEST_CASE_FIXTURE(FragmentAutocompleteFixture, "closers_offered_after_return_via_fragment_autocomplete_small_edit")
+{
+    // The edit is within a single line, so the fragment does not cover the enclosing if -
+    // the closers must be derived from the full source module, not the fragment ancestry
+    auto results = fragmentAutocomplete("if true then return en\n", "if true then return el\n", lsp::Position{0, 22});
+    CHECK(getItem(results, "else"));
+    CHECK(getItem(results, "elseif"));
+    auto item = requireItem(results, "end");
+    CHECK_EQ(item.sortText, std::string(SortText::PrioritisedSuggestion));
+}
+
 TEST_CASE_FIXTURE(Fixture, "table_property_autocomplete_has_documentation")
 {
     auto [source, marker] = sourceWithMarker(R"(
