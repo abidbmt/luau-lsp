@@ -178,10 +178,9 @@ repro via the folder harness under ASAN.
   [luau-lang/luau#2485](https://github.com/luau-lang/luau/issues/2485) (open as of
   2026-07-06). Until it is fixed upstream, every Luau bump must re-apply the patch;
   once a Luau release fixes it, drop the patch and the local submodule commit.
-  `UPSTREAM_ISSUE_DRAFT.md` (untracked) was the source of the issue text and can be
-  deleted.
-- Now removable (kept only as evidence for the issue): `build-asan/`,
-  `asan-reports/`, and the `luau-lsp-stock` git worktree (all local/ignored).
+- Kept as evidence for the issue (local/ignored, deletable whenever the user no
+  longer needs them): `build-asan/` and `asan-reports/`. The issue draft and the
+  `luau-lsp-stock` worktree were removed on 2026-07-06 after filing.
 - Considered but not done: forking luau-lang/luau on GitHub so the submodule pointer
   could reference a public SHA of the patched commit (would make clones self-contained
   and let the pointer be committed). The `patches/` flow is the chosen alternative.
