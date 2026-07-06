@@ -1,8 +1,8 @@
 # Vendored Luau patches
 
-Patches applied on top of the `luau` submodule (pinned to upstream 0.726,
-`86d2a9dc`). The submodule working tree in this checkout carries them as a
-local commit; on a fresh clone, re-apply with:
+Patches applied on top of the `luau` submodule (currently pinned to upstream
+0.728, `ddcea05e`; last re-applied 2026-07-06). The submodule working tree in
+this checkout carries them as a local commit; on a fresh clone, re-apply with:
 
 ```sh
 git -C luau apply ../patches/<patch>.patch
@@ -25,7 +25,7 @@ The patch gives `Module` strong refs (`dependencyModules`) to every module
 it pulled types from, in both solvers' require paths. Refs always point at
 modules created earlier in time, so no `shared_ptr` cycles.
 
-Repro/verification: `tools/lsp-e2e-folder.mjs` in the companion test repo
-(folder rename + sourcemap regen + diagnostics pull) — deterministic UAF
-under ASAN before the patch, clean after; 911/911 unit tests pass under
-ASAN. See `UPSTREAM_ISSUE_DRAFT.md` for the full writeup.
+Repro/verification: `e2e/lsp-e2e-folder.mjs` (folder rename + sourcemap regen
++ diagnostics pull) — deterministic UAF under ASAN before the patch, clean
+after; full unit test suite passes under ASAN. See `UPSTREAM_ISSUE_DRAFT.md`
+for the full writeup.

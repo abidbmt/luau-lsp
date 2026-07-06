@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## THIS IS A FORK — read FORK_MAINTENANCE.md first
+
+This checkout is abidbmt/luau-lsp, a fork of JohnnyMorganz/luau-lsp with custom
+features and a patched vendored Luau. Before doing ANY work here, read
+`FORK_MAINTENANCE.md` — it contains the fork's hard rules (notably: never commit the
+`luau` submodule pointer; never push or file upstream issues without the user's OK),
+the Windows build/test/VSIX commands actually used on this machine, the upstream-sync
+runbook, the e2e harnesses, and debugging playbooks. Feature docs: `FORK_FEATURES.md`.
+The rest of this file is upstream's generic guidance (their build examples assume
+Linux/macOS).
+
 ## Project Overview
 
 Luau Language Server (luau-lsp) is an implementation of the Language Server Protocol (LSP) for the Luau programming language. It provides IDE features like diagnostics, autocompletion, hover, go-to-definition, etc. The project also includes a standalone CLI (`luau-lsp analyze`) for CI type-checking and linting.
