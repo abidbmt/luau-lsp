@@ -27,5 +27,6 @@ modules created earlier in time, so no `shared_ptr` cycles.
 
 Repro/verification: `e2e/lsp-e2e-folder.mjs` (folder rename + sourcemap regen
 + diagnostics pull) — deterministic UAF under ASAN before the patch, clean
-after; full unit test suite passes under ASAN. See `UPSTREAM_ISSUE_DRAFT.md`
-for the full writeup.
+after; full unit test suite passes under ASAN. Reported upstream as
+https://github.com/luau-lang/luau/issues/2485 — the patch can be dropped
+once a vendored Luau release contains the fix.

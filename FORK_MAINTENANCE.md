@@ -174,11 +174,14 @@ repro via the folder harness under ASAN.
 
 - Vendored Luau: 0.728 (`ddcea05e`) + local UAF commit on top (working tree only).
   Pin branch for the previous base: `uaf-fix-726`.
-- `UPSTREAM_ISSUE_DRAFT.md` (untracked): ready-to-file writeup of the Luau UAF for
-  luau-lang/luau. The user files it themselves. Until upstream fixes it, every Luau
-  bump must re-apply the patch.
-- Removable once the issue is filed: `build-asan/`, `asan-reports/`, and the
-  `luau-lsp-stock` git worktree (all local/ignored; kept as evidence).
+- The Luau UAF is filed upstream as
+  [luau-lang/luau#2485](https://github.com/luau-lang/luau/issues/2485) (open as of
+  2026-07-06). Until it is fixed upstream, every Luau bump must re-apply the patch;
+  once a Luau release fixes it, drop the patch and the local submodule commit.
+  `UPSTREAM_ISSUE_DRAFT.md` (untracked) was the source of the issue text and can be
+  deleted.
+- Now removable (kept only as evidence for the issue): `build-asan/`,
+  `asan-reports/`, and the `luau-lsp-stock` git worktree (all local/ignored).
 - Considered but not done: forking luau-lang/luau on GitHub so the submodule pointer
   could reference a public SHA of the patched commit (would make clones self-contained
   and let the pointer be committed). The `patches/` flow is the chosen alternative.
